@@ -1,0 +1,9 @@
+# Boss timeline placeholder
+# Define encounter events with timestamps and descriptions.
+timeline:
+  - time: 10.0
+    name: "Tank Buster"
+    description: "Heavy single-target attack"
+  - time: 30.0
+    name: "Raid AoE"
+    description: "Area damage requiring mitigation"

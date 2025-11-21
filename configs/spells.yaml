@@ -1,0 +1,11 @@
+# Spell coefficients and costs placeholder
+# Populate with real data as the project evolves.
+spells:
+  TigerPalm:
+    damage_coefficient: 1.0
+    cooldown: 0.0
+    cost: 25
+  RisingSunKick:
+    damage_coefficient: 3.0
+    cooldown: 10.0
+    cost: 40
