@@ -6,17 +6,15 @@ from sb3_contrib.common.wrappers import ActionMasker
 
 
 # ==========================================
-# 1. Core: Player State
+# 1. Core: Player State (纯净版)
 # ==========================================
 class PlayerState:
-    def __init__(self, attack_power=5000, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500):
-        self.attack_power = attack_power
-        self.rating_crit = rating_crit
+    def __init__(self, rating_haste=1500, rating_mastery=1000, rating_vers=500):
+        # 移除 Attack Power，我们只关心机制
         self.rating_haste = rating_haste
         self.rating_mastery = rating_mastery
         self.rating_vers = rating_vers
 
-        self.base_crit = 0.10
         self.base_mastery = 0.19
 
         self.max_energy = 120.0
@@ -36,10 +34,11 @@ class PlayerState:
         self.update_stats()
 
     def update_stats(self):
-        self.crit = (self.rating_crit / 4600.0) + self.base_crit
+        # 移除 Crit (随机性干扰训练)
         self.versatility = (self.rating_vers / 5400.0)
         self.haste = (self.rating_haste / 4400.0)
 
+        # 精通递减逻辑
         dr_threshold = 1380
         eff_mast_rating = self.rating_mastery
         if self.rating_mastery > dr_threshold:
@@ -69,13 +68,13 @@ class PlayerState:
 
 
 # ==========================================
-# 2. Core: Spell Book
+# 2. Core: Spell Book (纯AP版)
 # ==========================================
 class Spell:
     def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
                  cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None):
         self.abbr = abbr
-        self.ap_coeff = ap_coeff
+        self.ap_coeff = ap_coeff  # e.g., 0.88
         self.energy_cost = energy
         self.chi_cost = chi_cost
         self.chi_gen = chi_gen
@@ -127,10 +126,18 @@ class Spell:
             return self.calculate_tick_damage(player)
 
     def calculate_tick_damage(self, player):
-        dmg = player.attack_power * self.tick_coeff
-        if player.last_spell_name != self.abbr: dmg *= (1.0 + player.mastery)
+        # --- 纯 AP 计算模式 ---
+        # 直接使用系数，移除 attack_power
+        dmg = self.tick_coeff
+
+        # 精通: 组合拳 (保留机制)
+        if player.last_spell_name != self.abbr:
+            dmg *= (1.0 + player.mastery)
+
+        # 全能 (保留机制)
         dmg *= (1.0 + player.versatility)
-        dmg *= (1.0 + player.crit)
+
+        # 移除 Crit (移除随机性)
         return dmg
 
     def tick_cd(self, dt):
@@ -203,8 +210,6 @@ class MonkEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.player = PlayerState()
-
-        # --- 配置核心点：只点 WDP 和 SW，不点 SOTWL ---
         self.book = SpellBook(talents=['WDP', 'SW'])
 
         scen_id = options['timeline'] if options else np.random.randint(0, 4)
@@ -259,16 +264,19 @@ class MonkEnv(gym.Env):
         self.time += step_dt
         _, _, done = self.timeline.get_status(self.time)
 
-        # --- Reward Shaping (关键修复) ---
         reward = total_damage
 
-        # 1. 鼓励回豆：如果只有0-1个豆，且打了TP，给额外奖励
+        # --- Reward Shaping (核心修改: 适配 AP% 数值体系) ---
+        # 现在的伤害量级是 1.0 - 15.0 左右
+        # TP 的基础伤害是 0.88 (AP%)
+        # 我们给它 +2.0 的奖励 (相当于送了 200% AP 的伤害)
+        # 这个诱惑力非常大 (0.88 -> 2.88)，比 Wait (0) 强太多
         if action_idx == 1 and self.player.chi <= 3:
-            reward += 500  # 相当于打了一个小技能的奖励，诱导它去打TP
+            reward += 2.0
 
-        # 2. 惩罚溢出：如果满豆还打TP，给惩罚
+            # 溢出惩罚也对应调整
         if action_idx == 1 and self.player.chi >= 5:
-            reward -= 500
+            reward -= 2.0
 
         return self._get_obs(), reward, done, False, {'damage': total_damage}
 
@@ -277,21 +285,21 @@ def mask_fn(env): return env.action_masks()
 
 
 def run():
-    print(">>> 初始化训练环境 (Talents: WDP, SW)...")
+    print(">>> 初始化训练环境 (Pure AP Mode)...")
     env = MonkEnv()
     env = ActionMasker(env, mask_fn)
 
     model = MaskablePPO("MlpPolicy", env, verbose=1, gamma=0.99, learning_rate=3e-4)
-    # 增加步数到 80000，确保学会循环
-    print(">>> 开始训练 (Steps: 80k)...")
-    model.learn(total_timesteps=80000)
+    print(">>> 开始训练 (Steps: 60k)...")
+    model.learn(total_timesteps=60000)
 
     scenarios = [(0, "Patchwerk"), (3, "Execute (End +200%)")]
 
     for scen_id, name in scenarios:
         print(f"\n{'=' * 30}\nTesting Scenario: {name}\n{'=' * 30}")
         obs, _ = env.reset(options={'timeline': scen_id})
-        print(f"{'Time':<6} | {'Action':<8} | {'Chi':<3} | {'Eng':<4} | {'GCD':<4} | {'Dmg':<6}")
+        # 打印列名：AP% 代表 Attack Power %
+        print(f"{'Time':<6} | {'Action':<8} | {'Chi':<3} | {'Eng':<4} | {'AP%':<6}")
 
         done = False
         while not done:
@@ -299,26 +307,27 @@ def run():
             action, _ = model.predict(obs, action_masks=masks, deterministic=True)
             action_item = action.item()
 
-            # State Capture
             t_now = env.unwrapped.time
             chi = env.unwrapped.player.chi
             en = env.unwrapped.player.energy
-            gcd = env.unwrapped.player.gcd_remaining
 
             obs, reward, done, _, info = env.step(action_item)
             dmg = info['damage']
 
             act_name = env.unwrapped.action_map[action_item]
 
-            # 智能Log: 如果是 Wait 且 GCD > 0，显示 Wait(GCD)
-            # 如果是有伤害或者是非Wait动作，打印
+            # Log Logic
             if action_item != 0:
-                print(f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {0.0:<4} | {int(dmg):<6}")
-            elif dmg > 0:  # 引导伤害
-                print(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {gcd:<4.1f} | {int(dmg):<6}")
-            # 如果是发呆，每 1.0 秒打印一次，避免刷屏
+                # 显示 AP 系数
+                print(f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
+            elif dmg > 0:
+                print(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
             elif int(t_now * 10) % 10 == 0:
-                pass  # 可以选择打印 Wait 方便调试，这里暂时省略保持清爽
+                # 打印 Wait 状态，确认是否发呆
+                # 只有当 GCD 转好且没动作时，才算真正的“发呆”
+                gcd_rem = env.unwrapped.player.gcd_remaining
+                if gcd_rem <= 0.001:
+                    print(f"{t_now:<6.1f} | {'Wait...':<8} | {int(chi):<3} | {int(en):<4} | {0.0:<6.2f}")
 
 
 if __name__ == '__main__':
