@@ -1,4 +1,4 @@
-# ppmonk/core/player.py
+"""Player state management for PPMonk."""
 
 class PlayerState:
     def __init__(self,
@@ -7,7 +7,6 @@ class PlayerState:
                  rating_haste=1500,
                  rating_mastery=1000,
                  rating_vers=500):
-
         # --- 输入属性 (Ratings) ---
         self.attack_power = attack_power
         self.rating_crit = rating_crit
@@ -26,7 +25,6 @@ class PlayerState:
         self.base_mastery_pct = 0.19  # 19%
 
         # --- 实时面板属性 (0.0 - 1.0) ---
-        # 初始化时计算一次
         self.crit = 0.0
         self.haste = 0.0
         self.mastery = 0.0
@@ -35,105 +33,77 @@ class PlayerState:
 
         # --- 资源状态 ---
         self.max_energy = 120.0
+        self.energy_regen_mult = 1.0  # 能量回复倍率 (默认为1.0)
         self.energy = 120.0
         self.max_chi = 6
-        self.chi = 0  # 初始通常为0，或者根据战斗配置设为1-2
+        self.chi = 2  # 起手2豆
 
         # --- 战斗状态机 ---
-        self.last_spell_name = None  # 用于组合拳判定
-
+        self.last_spell_name = None
         self.gcd_remaining = 0.0
 
         # 引导状态 (FOF, SCK)
         self.is_channeling = False
-        self.current_channel_spell = None  # 记录正在引导哪个 Spell 对象
-        self.channel_time_remaining = 0.0  # 引导剩余总时间
-        self.channel_tick_interval = 0.0  # 每跳间隔
-        self.time_until_next_tick = 0.0  # 距离下一跳还有多久
-        self.channel_ticks_remaining = 0  # 剩余跳数
+        self.current_channel_spell = None
+        self.channel_time_remaining = 0.0
+        self.channel_ticks_remaining = 0
+        self.time_until_next_tick = 0.0
+        self.channel_tick_interval = 0.0
 
         # 引导技能的精通快照 (组合拳判定)
         self.channel_mastery_snapshot = False
 
     def update_secondary_stats(self):
-        """
-        根据 Rating 计算最终百分比，包含递减效应 (DR)。
-        """
-        # 1. Haste / Vers / Crit (假设遵循标准DR，阈值通常是 rating 换算出的 30%)
-        # 这里为了简化，先按线性计算，如果需要这些属性的DR，可以在这里加
-        # 暴击 = Rating / 46 + 10%
+        """根据 Rating 计算最终百分比，包含递减效应 (DR)。"""
+        # 1. Haste / Vers / Crit
         self.crit = (self.rating_crit / self.RATING_PER_CRIT / 100.0) + self.base_crit_pct
-
-        # 全能 = Rating / 54
         self.versatility = (self.rating_vers / self.RATING_PER_VERS / 100.0)
-
-        # 急速 = Rating / 44
         self.haste = (self.rating_haste / self.RATING_PER_HASTE / 100.0)
 
         # 2. Mastery (特殊递减逻辑)
-        # 阈值 = 30 * 46 = 1380 Rating
         dr_threshold = 30.0 * self.RATING_PER_CRIT  # 1380
-        effective_mastery_rating = 0.0
-
         if self.rating_mastery <= dr_threshold:
             effective_mastery_rating = self.rating_mastery
         else:
-            # 第一档递减: 超过部分只生效 90% (WoW 标准是 10% penalty)
             excess = self.rating_mastery - dr_threshold
             effective_mastery_rating = dr_threshold + (excess * 0.9)
-
-            # 如果数值极大，可能还有第二档(通常是39% stats)，暂不展开
-
-        # 精通 = 有效Rating / 20 + 19%
         self.mastery = (effective_mastery_rating / self.RATING_PER_MASTERY / 100.0) + self.base_mastery_pct
 
-    def tick(self, delta_time):
-        """
-        物理引擎核心跳动
-        """
-        # 1. 能量回复 (Energy Regen)
-        # 公式: Base(10) * (1 + Haste)
-        regen_rate = 10.0 * (1.0 + self.haste)
-        # 即使在引导时，能量通常也是回复的
-        if self.energy < self.max_energy:
-            self.energy = min(self.max_energy, self.energy + regen_rate * delta_time)
+    def advance_time(self, duration):
+        """推进时间轴，处理资源回复与引导伤害。"""
+        total_damage = 0
+        dt = 0.01
+        elapsed = 0.0
+        regen_rate = 10.0 * (1.0 + self.haste) * self.energy_regen_mult
 
-        # 2. GCD 冷却
-        if self.gcd_remaining > 0:
-            self.gcd_remaining = max(0, self.gcd_remaining - delta_time)
+        while elapsed < duration:
+            step = min(dt, duration - elapsed)
+            if self.energy < self.max_energy:
+                self.energy = min(self.max_energy, self.energy + regen_rate * step)
 
-        # 3. 引导处理 (Channeling Logic)
-        tick_damage = 0
+            if self.gcd_remaining > 0:
+                self.gcd_remaining = max(0, self.gcd_remaining - step)
 
-        if self.is_channeling:
-            self.channel_time_remaining -= delta_time
-            self.time_until_next_tick -= delta_time
+            if self.is_channeling:
+                self.channel_time_remaining -= step
+                self.time_until_next_tick -= step
 
-            # 判定跳伤害
-            if self.time_until_next_tick <= 0:
-                if self.channel_ticks_remaining > 0:
+                if self.time_until_next_tick <= 1e-6 and self.channel_ticks_remaining > 0:
                     spell = self.current_channel_spell
-                    tick_damage = spell.calculate_tick_damage(self)
+                    tick_dmg = spell.calculate_tick_damage(self)
+                    total_damage += tick_dmg
                     self.channel_ticks_remaining -= 1
-
-                    # 重置下一跳计时器 (加上剩余的负值以保持时间精确)
                     self.time_until_next_tick += self.channel_tick_interval
 
-            # 判定引导结束
-            if self.channel_time_remaining <= 0 or self.channel_ticks_remaining <= 0:
-                self.break_channel()
+                if self.channel_time_remaining <= 1e-6 or self.channel_ticks_remaining <= 0:
+                    self.is_channeling = False
+                    self.current_channel_spell = None
+                    self.channel_mastery_snapshot = False
 
-        return 0, tick_damage
+            elapsed += step
 
-    def break_channel(self):
-        """打断或结束引导"""
-        self.is_channeling = False
-        self.current_channel_spell = None
-        self.channel_time_remaining = 0
-        self.channel_ticks_remaining = 0
-        self.channel_mastery_snapshot = False
+        return total_damage
 
-    # 辅助：获取当前快照属性 (Snapshot) 用于 DoT/HoT
-    # 如果以后需要动态属性 (如饰品触发)，在这个类里加一个 buffs_stats_modifier
     def get_current_ap(self):
-        return self.attack_power  # 以后加上 * (1 + ap_buff_pct)
+        """返回当前攻击强度，供以后扩展 buff 使用。"""
+        return self.attack_power

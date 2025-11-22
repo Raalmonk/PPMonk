@@ -1,6 +1,5 @@
-"""Reinforcement learning environment wrappers for PPMonk."""
+"""Reinforcement learning environments for PPMonk."""
 
 from .monk_env import MonkEnv
-from .observation import ObservationEncoder
 
-__all__ = ["MonkEnv", "ObservationEncoder"]
+__all__ = ["MonkEnv"]
