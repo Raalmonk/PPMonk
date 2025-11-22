@@ -30,6 +30,7 @@ class PlayerState:
         self.channel_ticks_remaining = 0
         self.time_until_next_tick = 0.0
         self.channel_tick_interval = 0.0
+        self.channel_mastery_snapshot = False
 
         self.update_stats()
 
@@ -64,6 +65,7 @@ class PlayerState:
             if self.channel_time_remaining <= 0 or self.channel_ticks_remaining <= 0:
                 self.is_channeling = False
                 self.current_channel_spell = None
+                self.channel_mastery_snapshot = False
         return tick_damage
 
 
@@ -89,6 +91,7 @@ class Spell:
         self.gcd_override = gcd_override
         self.is_known = True
         self.current_cd = 0.0
+        self.is_combo_strike = True
 
     def is_usable(self, player, other_spells):
         if not self.is_known: return False
@@ -111,6 +114,10 @@ class Spell:
         else:
             player.gcd_remaining = 1.0
 
+        triggers_mastery = self.is_combo_strike and \
+                           (player.last_spell_name is not None) and \
+                           (player.last_spell_name != self.abbr)
+
         player.last_spell_name = self.abbr
 
         if self.is_channeled:
@@ -121,17 +128,29 @@ class Spell:
             player.channel_ticks_remaining = self.total_ticks
             player.channel_tick_interval = cast_t / self.total_ticks
             player.time_until_next_tick = player.channel_tick_interval
+            player.channel_mastery_snapshot = triggers_mastery
             return 0
         else:
-            return self.calculate_tick_damage(player)
+            return self.calculate_tick_damage(player, mastery_override=triggers_mastery)
 
-    def calculate_tick_damage(self, player):
+    def calculate_tick_damage(self, player, mastery_override=None):
         # --- 纯 AP 计算模式 ---
         # 直接使用系数，移除 attack_power
         dmg = self.tick_coeff
 
         # 精通: 组合拳 (保留机制)
-        if player.last_spell_name != self.abbr:
+        apply_mastery = False
+
+        if mastery_override is not None:
+            apply_mastery = mastery_override
+        elif self.is_channeled:
+            apply_mastery = player.channel_mastery_snapshot
+        else:
+            apply_mastery = self.is_combo_strike and \
+                           (player.last_spell_name is not None) and \
+                           (player.last_spell_name != self.abbr)
+
+        if apply_mastery:
             dmg *= (1.0 + player.mastery)
 
         # 全能 (保留机制)
