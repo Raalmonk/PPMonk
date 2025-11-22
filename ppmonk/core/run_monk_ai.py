@@ -5,7 +5,7 @@ from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 
 # ==========================================
-# 1. Core: Player State
+# 1. Core: Player State (属性与数值)
 # ==========================================
 class PlayerState:
     def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500):
@@ -79,7 +79,7 @@ class PlayerState:
         return tick_damage
 
 # ==========================================
-# 2. Core: Spell Book
+# 2. Core: Spell Book (修正逻辑与数值)
 # ==========================================
 class Spell:
     def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False, 
@@ -123,6 +123,7 @@ class Spell:
         else:
             player.gcd_remaining = 1.0
             
+        # [核心逻辑] 必须有上一技能且不同，才触发精通
         triggers_mastery = self.is_combo_strike and \
                            (player.last_spell_name is not None) and \
                            (player.last_spell_name != self.abbr)
@@ -175,10 +176,11 @@ class SpellBook:
             'BOK': Spell('BOK', 3.56, chi_cost=1),
             'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
             'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
-            # FOF
+            # [数值还原] 207% * 5
             'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0, cast_haste=True),
             'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True),
             'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True),
+            # [数值还原] 8.96
             'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4)
         }
         self.talents = talents
@@ -192,28 +194,36 @@ class SpellBook:
         for s in self.spells.values(): s.tick_cd(dt)
 
 # ==========================================
-# 3. Timeline & Env (Major Upgrade)
+# 3. Timeline & Env
 # ==========================================
 class Timeline:
     def __init__(self, scenario_id):
         self.scenario_id = scenario_id
         self.duration = 20.0
         self.is_random_dt = False
+        self.burst_start = -1.0
+        if scenario_id == 3:
+            self.burst_start = 16.0
+
     def reset(self):
         self.is_random_dt = (np.random.rand() < 0.2) if self.scenario_id == 2 else False
+
     def get_status(self, t):
         uptime, mod, done = True, 1.0, False
         if t >= self.duration: return uptime, mod, True
+        
         if self.scenario_id == 1 and 8.0 <= t < 12.0: uptime = False
         if self.scenario_id == 2 and 8.0 <= t < 12.0 and self.is_random_dt: uptime = False
-        if self.scenario_id == 3 and t >= 16.0: mod = 3.0
+        
+        if self.scenario_id == 3 and t >= self.burst_start:
+            mod = 3.0
+            
         return uptime, mod, done
 
 class MonkEnv(gym.Env):
     def __init__(self):
-        # State Size Increased for One-Hot and Normalization
-        # [Energy(norm), Chi(norm), GCD(norm), CD_RSK, CD_FOF, CD_WDP, CD_SOTWL, CD_SW, Time(norm), Uptime, Mod, Scen0, Scen1, Scen2, Scen3]
-        self.observation_space = spaces.Box(low=0, high=1, shape=(15,), dtype=np.float32)
+        # Obs: Normalized features + TimeToBurst + OneHot
+        self.observation_space = spaces.Box(low=0, high=1, shape=(16,), dtype=np.float32)
         self.action_space = spaces.Discrete(9)
         self.action_map = {0: 'Wait', 1:'TP', 2:'BOK', 3:'RSK', 4:'SCK', 5:'FOF', 6:'WDP', 7:'SOTWL', 8:'SW'}
         self.spell_keys = list(self.action_map.values())[1:]
@@ -233,13 +243,19 @@ class MonkEnv(gym.Env):
     def _get_obs(self):
         uptime, mod, _ = self.timeline.get_status(self.time)
         
-        # [Fix] Normalize Features 0.0 - 1.0
+        # Feature: Time To Burst (Countdown)
+        time_to_burst = 1.0
+        if self.timeline.burst_start > 0:
+            if self.time < self.timeline.burst_start:
+                time_to_burst = (self.timeline.burst_start - self.time) / 20.0
+            else:
+                time_to_burst = 0.0 
+        
         norm_energy = self.player.energy / 120.0
         norm_chi = self.player.chi / 6.0
         norm_gcd = self.player.gcd_remaining / 1.5
         norm_time = self.time / 20.0
         
-        # CDs (Normalize by 30s cap)
         norm_cds = [
             self.book.spells['RSK'].current_cd / 30.0,
             self.book.spells['FOF'].current_cd / 30.0,
@@ -248,18 +264,17 @@ class MonkEnv(gym.Env):
             self.book.spells['SW'].current_cd / 30.0,
         ]
         
-        # [Fix] One-Hot Encoding for Scenario
         scen_onehot = [0.0, 0.0, 0.0, 0.0]
         scen_onehot[self.scenario] = 1.0
         
-        # [1 + 1 + 1 + 5 + 1 + 1 + 1 + 4] = 15 dims
         obs = [
-            norm_energy, norm_chi, norm_gcd,
-            *norm_cds,
-            norm_time,
-            1.0 if uptime else 0.0,
-            mod / 3.0, # Normalize mod (max 3.0)
-            *scen_onehot
+            norm_energy, norm_chi, norm_gcd, 
+            *norm_cds, 
+            norm_time, 
+            1.0 if uptime else 0.0, 
+            mod / 3.0,
+            *scen_onehot,
+            time_to_burst
         ]
         return np.array(obs, dtype=np.float32)
 
@@ -275,69 +290,65 @@ class MonkEnv(gym.Env):
 
     def step(self, action_idx):
         step_dt = 0.1 
-        total_damage = 0
+        step_damage = 0
         uptime, mod, _ = self.timeline.get_status(self.time)
         
         if action_idx > 0:
             key = self.action_map[action_idx]
             dmg = self.book.spells[key].cast(self.player)
-            total_damage += dmg
+            step_damage += dmg
 
         tick_dmg = self.player.tick(step_dt)
-        total_damage += tick_dmg
+        step_damage += tick_dmg
         self.book.tick(step_dt)
-        total_damage *= mod
+        
+        # Apply Mod
+        step_damage *= mod
+        
         self.time += step_dt
         _, _, done = self.timeline.get_status(self.time)
         
-        reward = total_damage
-        
-        # --- [Aggressive Reward Shaping] ---
-        if self.scenario == 3:
-            # If Cast SW (Index 8)
-            if action_idx == 8: 
-                if self.time < 16.0:
-                    # Harsh Penalty for Early Cast
-                    reward -= 100.0 
-                else:
-                    # Huge Reward for Late Cast
-                    reward += 200.0
+        # [核心改动] 移除所有 Reward Shaping
+        # 奖励 = 纯伤害 (AP系数)
+        # 我们相信 PPO 能通过 Gamma 发现长期价值
+        reward = step_damage 
 
-        # Resource Guidance
-        if action_idx == 1 and self.player.chi <= 3: reward += 2.0 
-        if action_idx == 1 and self.player.chi >= 5: reward -= 2.0
-        if action_idx == 5: reward += 2.0 # Encourage FOF slightly
-
-        return self._get_obs(), reward, done, False, {'damage': total_damage}
+        return self._get_obs(), reward, done, False, {'damage': step_damage}
 
 def mask_fn(env): return env.action_masks()
 
 def run():
-    print(">>> 初始化训练环境 (Normalized & One-Hot)...")
+    print(">>> 初始化训练环境 (Pure RL: No Hand-holding)...")
     env = MonkEnv()
+    
     env.reset()
     p = env.unwrapped.player
+    talents = env.unwrapped.book.talents
     print(f"{'='*40}")
     print(f"PLAYER STATS:")
     print(f"  Haste: {p.haste*100:.2f}%")
     print(f"  Crit : {p.crit*100:.2f}%")
     print(f"  Mast : {p.mastery*100:.2f}%")
     print(f"  Vers : {p.versatility*100:.2f}%")
+    print(f"  Talents: {talents}")
     print(f"{'='*40}\n")
     
     env = ActionMasker(env, mask_fn)
     
-    # Gamma 0.999 + Entropy 0.01 to force exploration
+    # Gamma = 0.9995: 视野极远
+    # Entropy = 0.03: 增加随机探索
     model = MaskablePPO(
         "MlpPolicy", 
         env, 
         verbose=1, 
-        gamma=0.999, 
+        gamma=0.9995, 
         learning_rate=3e-4,
-        ent_coef=0.02 # Higher entropy to try waiting
+        ent_coef=0.03
     )
-    print(">>> 开始训练 (Steps: 250k)...")
-    model.learn(total_timesteps=250000) 
+    
+    # [Increased Steps] 40万步，给它足够的时间去撞墙、去顿悟
+    print(">>> 开始训练 (Steps: 400k)...")
+    model.learn(total_timesteps=400000) 
     
     scenarios = [(0, "Patchwerk"), (3, "Execute (End +200%)")]
     
@@ -346,6 +357,7 @@ def run():
         obs, _ = env.reset(options={'timeline': scen_id})
         print(f"{'Time':<6} | {'Action':<8} | {'Chi':<3} | {'Eng':<4} | {'AP%':<6}")
         
+        total_ap = 0.0
         done = False
         while not done:
             masks = env.action_masks()
@@ -358,12 +370,17 @@ def run():
             
             obs, reward, done, _, info = env.step(action_item)
             dmg = info['damage']
+            total_ap += dmg
+            
             act_name = env.unwrapped.action_map[action_item]
             
             if action_item != 0:
                 print(f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
             elif dmg > 0: 
                 print(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
+        
+        print(f"{'-'*30}")
+        print(f"Total AP Output: {total_ap:.2f}")
 
 if __name__ == '__main__':
     run()
