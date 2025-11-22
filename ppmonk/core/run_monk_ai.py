@@ -7,7 +7,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import get_device
 
 # ==========================================
-# 1. Core Classes (数值保持原样)
+# 1. Core Classes (Fixed Logic)
 # ==========================================
 class PlayerState:
     def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500):
@@ -47,16 +47,11 @@ class PlayerState:
             eff_mast_rating = dr_threshold + (excess * 0.9)
         self.mastery = (eff_mast_rating / 2000.0) + self.base_mastery
 
-    # [新功能] 精确快进
+    # [核心修复] 正确处理时间流逝
     def advance_time(self, duration):
-        """
-        快进指定的时间(duration)，期间处理能量回复和引导伤害。
-        返回这段时间内的总伤害。
-        """
         total_damage = 0
-        dt = 0.01 # 内部模拟精度 10ms
+        dt = 0.01 
         elapsed = 0.0
-        
         regen_rate = 10.0 * (1.0 + self.haste)
         
         while elapsed < duration:
@@ -65,8 +60,9 @@ class PlayerState:
             # 1. 能量回复
             self.energy = min(self.max_energy, self.energy + regen_rate * step)
             
-            # 2. 冷却转动 (GCD在外面单独算，这里只算buff/channel)
-            # (CDs are managed by SpellBook tick)
+            # 2. [修复] GCD 冷却
+            if self.gcd_remaining > 0:
+                self.gcd_remaining = max(0, self.gcd_remaining - step)
             
             # 3. 引导伤害
             if self.is_channeling:
@@ -76,10 +72,8 @@ class PlayerState:
                 if self.time_until_next_tick <= 1e-6:
                     if self.channel_ticks_remaining > 0:
                         spell = self.current_channel_spell
-                        # 伤害计算
                         tick_dmg = spell.calculate_tick_damage(self)
                         total_damage += tick_dmg
-                        
                         self.channel_ticks_remaining -= 1
                         self.time_until_next_tick += self.channel_tick_interval
                 
@@ -89,7 +83,6 @@ class PlayerState:
                     self.channel_mastery_snapshot = False
             
             elapsed += step
-            
         return total_damage
 
 class Spell:
@@ -127,31 +120,26 @@ class Spell:
 
     def is_usable(self, player):
         if not self.is_known: return False
-        if self.current_cd > 1e-2: return False
+        # [修改] CD 检查稍微宽松一点，允许 step 函数里的自动等待逻辑处理微小CD
+        if self.current_cd > 20.0: return False # CD太长肯定不能用
         if player.energy < self.energy_cost: return False
         if player.chi < self.chi_cost: return False
-        # 注意：现在允许打断引导，所以移除 is_channeling 检查，或者由策略决定
-        # 为了简单，还是禁止在引导时施法
-        if player.is_channeling: return False 
         return True
 
     def cast(self, player):
-        # 消耗
         player.energy -= self.energy_cost
         player.chi = max(0, player.chi - self.chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen)
         
-        # CD
         self.current_cd = self.get_effective_cd(player)
         
-        # 精通
+        if self.gcd_override is not None:
+            player.gcd_remaining = self.gcd_override
+        else:
+            player.gcd_remaining = 1.0
+            
         triggers_mastery = self.is_combo_strike and (player.last_spell_name is not None) and (player.last_spell_name != self.abbr)
         player.last_spell_name = self.abbr
-        
-        # 占用时间 (Lockout Time)
-        # 对于瞬发：占用 = GCD
-        # 对于引导：占用 = 0 (开始引导后立即进入引导状态，但后续时间由 step 函数快进)
-        # 但为了模型简单，我们认为施放动作本身是瞬发的，"时间流逝"由 step 函数处理
         
         if self.is_channeled:
             cast_t = self.get_effective_cast_time(player)
@@ -185,7 +173,7 @@ class SpellWDP(Spell):
         if not super().is_usable(player): return False
         rsk = other_spells['RSK']
         fof = other_spells['FOF']
-        return rsk.current_cd > 0 and fof.current_cd > 0 # WDP Logic
+        return rsk.current_cd > 0 and fof.current_cd > 0
 
 class SpellBook:
     def __init__(self, talents):
@@ -206,6 +194,9 @@ class SpellBook:
     def tick(self, dt):
         for s in self.spells.values(): s.tick_cd(dt)
 
+# ==========================================
+# 3. Timeline (God View)
+# ==========================================
 class Timeline:
     def __init__(self, scenario_id):
         self.scenario_id = scenario_id
@@ -213,13 +204,13 @@ class Timeline:
         self.burst_start = -1.0
         if scenario_id == 3: self.burst_start = 16.0
         
-        # 全局地图
+        # [Global Map] 20秒的伤害倍率地图
         self.global_map = np.zeros(20, dtype=np.float32)
         for i in range(20):
             t = float(i)
             mod = 1.0
             if scenario_id == 3 and t >= self.burst_start: mod = 3.0
-            self.global_map[i] = mod / 3.0
+            self.global_map[i] = mod / 3.0 # 归一化
 
     def get_status(self, t):
         mod = 1.0
@@ -241,8 +232,10 @@ class MonkEnv(gym.Env):
         if seed is not None: self.rng = np.random.default_rng(seed)
         self.player = PlayerState()
         self.book = SpellBook(talents=['WDP', 'SW']) 
-        
-        scen_id = options['timeline'] if options else self.rng.integers(0, 4)
+        if options and 'timeline' in options:
+            scen_id = options['timeline']
+        else:
+            scen_id = self.rng.integers(0, 4)
         self.scenario = scen_id 
         self.timeline = Timeline(scen_id)
         self.time = 0.0
@@ -256,95 +249,81 @@ class MonkEnv(gym.Env):
         norm_time = self.time / 20.0
         norm_cds = [self.book.spells[k].current_cd / 30.0 for k in ['RSK', 'FOF', 'WDP', 'SOTWL', 'SW']]
         norm_mod = mod / 3.0
-        
         dynamic = [norm_energy, norm_chi, norm_gcd, *norm_cds, norm_time, norm_mod]
         return np.concatenate((dynamic, self.timeline.global_map), axis=0).astype(np.float32)
 
     def action_masks(self):
-        # 如果时间结束，封锁所有
-        if self.time >= 20.0: return [False]*9 # 其实Gym会重置，但保险起见
-        
+        if self.time >= 20.0: return [False]*9
         masks = [True] * 9
-        # 如果 GCD 还没转好，或者正在引导，不允许施放新技能 (Wait除外)
-        # [重要] 在 Event-Driven 模式下，我们希望 AI 只有在"空闲"时才决策
-        # 但为了处理"能量不足等一等"的情况，Wait 始终是可用的
-        
-        is_locked = (self.player.gcd_remaining > 0.01) or self.player.is_channeling
-        if is_locked:
-            # 理论上 Event-Driven 不应该出现在锁定状态被 call step
-            # 除非我们显式设计了 "Wait until ready"
-            pass
-
+        # 注意：Event Driven 允许任何 CD < 剩余时间 的技能
+        # 但为了简单，我们只 Mask 掉完全不能用的（比如资源不够）
+        # CD check logic is inside is_usable (relaxed)
         for i, key in enumerate(self.spell_keys):
             spell = self.book.spells[key]
-            # 特殊：对于 WDP，需要传入 spellbook 检查其他 CD
             if key == 'WDP':
                 masks[i+1] = spell.is_usable(self.player, self.book.spells)
             else:
                 masks[i+1] = spell.is_usable(self.player)
         return masks
 
-    # ==========================================
-    # [核心] 事件驱动的 Step 函数
-    # ==========================================
     def step(self, action_idx):
         total_damage = 0
-        current_mod = 1.0
-        if self.scenario == 3 and self.time >= 16.0: current_mod = 3.0
         
-        # 1. 执行动作 (Decision)
-        executed = False
-        time_advanced = 0.0
+        # 1. 处理动作前的时间流逝 (Auto-Wait for CD/GCD)
+        # 如果选了技能，但 GCD 没转好，或者 CD 差一点点，我们快进
+        time_to_wait = 0.0
         
-        if action_idx > 0: # Cast Spell
+        # GCD 锁
+        if self.player.gcd_remaining > 0:
+            time_to_wait = max(time_to_wait, self.player.gcd_remaining)
+            
+        # CD 锁 (如果选了技能)
+        if action_idx > 0:
+            key = self.action_map[action_idx]
+            spell = self.book.spells[key]
+            if spell.current_cd > 0:
+                time_to_wait = max(time_to_wait, spell.current_cd)
+                
+        # 执行等待 (Advance Time)
+        if time_to_wait > 0:
+            # 分段计算伤害，因为 mod 可能在等待期间变化
+            # 简化处理：按起点 mod 算 (误差很小)
+            _, current_mod, _ = self.timeline.get_status(self.time)
+            dmg_tick = self.player.advance_time(time_to_wait)
+            self.book.tick(time_to_wait)
+            self.time += time_to_wait
+            total_damage += dmg_tick * current_mod
+            
+        # 2. 执行动作
+        _, current_mod, _ = self.timeline.get_status(self.time)
+        lockout = 0.0
+        
+        if action_idx > 0: # Cast
             key = self.action_map[action_idx]
             spell = self.book.spells[key]
             
-            # 施放 (扣资源, 进CD, 给直接伤害)
-            # 注意：引导技能返回0伤害，伤害在 tick 里出
+            # 施放
             dmg = spell.cast(self.player)
             total_damage += dmg * current_mod
             
-            # 确定这个动作占用的时间 (Lockout)
-            # 瞬发 = GCD (通常1.0s, SW 0.4s)
-            # 引导 = 引导时间 (FOF 4s)
+            # 计算动作占用时间
             if spell.is_channeled:
                 lockout = spell.get_effective_cast_time(self.player)
             else:
-                lockout = self.player.gcd_remaining # 施放后自动设置了 gcd_remaining
+                lockout = self.player.gcd_remaining # cast() set this to 1.0 or 0.4
                 
-            # [快进] 直接跳过这段时间！
-            # 在这段时间里，PlayerState.tick 会处理引导伤害和能量回复
+        else: # Wait (Action 0)
+            lockout = 0.1 # 空过 0.1s
+            
+        # 3. 执行动作后的时间流逝
+        if lockout > 0:
             dmg_tick = self.player.advance_time(lockout)
-            
-            # 处理 Mod (稍微复杂点，因为快进期间 Mod 可能变化)
-            # 为了简单，这里假设快进期间 Mod 不变，或者取当前的。
-            # 严格来说应该切片计算，但对于 20s 战斗误差可接受。
-            total_damage += dmg_tick * current_mod
-            
-            # 也要让 SpellBook 转 CD
             self.book.tick(lockout)
-            
             self.time += lockout
-            executed = True
-            
-        else: # Wait (0)
-            # 没技能打，或者没能量，或者纯粹想等
-            # 我们强制它"等一小会儿"，比如 0.1s，或者等到最近的一个 CD 转好
-            # 简单起见，Wait = 空过 0.1s 回能
-            wait_time = 0.1
-            dmg_tick = self.player.advance_time(wait_time)
-            self.book.tick(wait_time)
-            self.time += wait_time
-            total_damage += dmg_tick * current_mod # 只有引导伤害可能在这里跳
+            total_damage += dmg_tick * current_mod
 
         done = self.time >= 20.0
-        
-        # 纯伤害奖励，无作弊
-        # 因为步数变少了（200步 -> 20步），每一步的权重变大了
-        # 这极大地帮助了信用分配 (Credit Assignment)
         reward = total_damage 
-
         return self._get_obs(), reward, done, False, {'damage': total_damage}
 
 def mask_fn(env): return env.action_masks()
@@ -360,8 +339,7 @@ def make_env(rank):
     return _init
 
 def run():
-    print(f">>> 初始化事件驱动环境 (Event-Driven: ~20 Steps/Episode)...")
-    # 步数极少，所以不需要太多并行
+    print(f">>> 初始化上帝视角+事件驱动环境 (God View + Event Physics)...")
     num_cpu = 16 
     env = SubprocVecEnv([make_env(i) for i in range(num_cpu)])
     
@@ -371,13 +349,11 @@ def run():
         verbose=1, 
         gamma=1.0,          
         learning_rate=3e-4,
-        ent_coef=0.02, # 适当探索
-        n_steps=256,   # 因为每局只有20步，256步=12局，足够了
-        batch_size=512,    
+        ent_coef=0.02,
+        n_steps=512,       
+        batch_size=1024,    
     )
     
-    # 步数少，总步数也可以减少
-    # 50万步相当于玩了 2.5万局游戏！足够学会了
     print(">>> 开始训练 (Steps: 500k)...")
     model.learn(total_timesteps=500000) 
     
