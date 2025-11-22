@@ -91,23 +91,40 @@ class Spell:
         else:
             player.gcd_remaining = 1.0
 
+        # 精通触发判定：必须在覆盖 last_spell_name 之前完成
+        triggers_mastery = self.is_combo_strike and (player.last_spell_name != self.abbr)
+
+        # 更新上一技能记录
         player.last_spell_name = self.abbr
 
         if self.is_channeled:
             eff_cast_time = self.get_effective_cast_time(player)
             player.is_channeling = True
-            player.channel_remaining = eff_cast_time
+            player.channel_time_remaining = eff_cast_time
             player.current_channel_spell = self
             player.channel_ticks_remaining = self.total_ticks
             player.channel_tick_interval = self.get_tick_interval(player)
             player.time_until_next_tick = player.channel_tick_interval
+
+            # 引导技能需要在施放瞬间记录是否触发了精通
+            player.channel_mastery_snapshot = triggers_mastery
             return 0.0
         else:
-            return self.calculate_tick_damage(player)
+            return self.calculate_tick_damage(player, mastery_override=triggers_mastery)
 
-    def calculate_tick_damage(self, player):
+    def calculate_tick_damage(self, player, mastery_override=None):
         dmg = player.attack_power * self.tick_damage_coeff
-        if self.is_combo_strike and player.last_spell_name != self.abbr:
+
+        # Mastery: Combo Strikes
+        apply_mastery = False
+
+        if mastery_override is not None:
+            apply_mastery = mastery_override
+        elif self.is_channeled:
+            # 引导技能从玩家身上的快照读取判定
+            apply_mastery = player.channel_mastery_snapshot
+
+        if apply_mastery:
             dmg *= (1.0 + player.mastery)
         dmg *= (1.0 + player.versatility)
         return dmg
