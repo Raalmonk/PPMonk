@@ -1,7 +1,6 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-import torch
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -9,13 +8,8 @@ from stable_baselines3.common.utils import get_device
 
 
 # ==========================================
-# 1. Core Logic (保持逻辑完全不变，只改训练参数)
+# 1. Core Logic (Player & Spell) - 保持不变
 # ==========================================
-# ... (此处粘贴 PlayerState, Spell, SpellBook, Timeline, MonkEnv 类的代码) ...
-# ... (为了节省篇幅，请直接使用上一版 run_monk_pro.py 中的这几个类，逻辑完全一致) ...
-# ... (务必确保 MonkEnv 的 _get_obs 和 step 逻辑是最新的纯净版) ...
-
-# 为了方便运行，我把关键类再次精简列出，实际运行时请确保完整
 class PlayerState:
     def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500):
         self.rating_crit = rating_crit
@@ -137,7 +131,8 @@ class Spell:
             apply_mastery = mastery_override
         elif self.is_channeled:
             apply_mastery = player.channel_mastery_snapshot
-        if apply_mastery: dmg *= (1.0 + player.mastery)
+        if apply_mastery:
+            dmg *= (1.0 + player.mastery)
         dmg *= (1.0 + player.versatility)
         return dmg
 
@@ -160,6 +155,7 @@ class SpellBook:
             'BOK': Spell('BOK', 3.56, chi_cost=1),
             'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
             'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
+            # FOF
             'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0,
                          cast_haste=True),
             'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True),
@@ -177,72 +173,96 @@ class SpellBook:
         for s in self.spells.values(): s.tick_cd(dt)
 
 
+# ==========================================
+# 3. Timeline (The Brain)
+# ==========================================
 class Timeline:
     def __init__(self, scenario_id):
         self.scenario_id = scenario_id
         self.duration = 20.0
-        self.is_random_dt = False
         self.burst_start = -1.0
         if scenario_id == 3: self.burst_start = 16.0
 
-    def reset(self):
-        self.is_random_dt = (np.random.rand() < 0.2) if self.scenario_id == 2 else False
+        # [核心功能] 生成全图视野
+        self.global_map = self._generate_global_map()
 
-    def get_status(self, t):
+    def _generate_global_map(self):
+        # 创建一个 20 维的向量，每一位代表第 N 秒的伤害倍率
+        # Resolution: 1 second per bin
+        map_vec = np.zeros(20, dtype=np.float32)
+        for i in range(20):
+            t = float(i)
+            _, mod, _ = self.get_status_at(t)
+            map_vec[i] = mod / 3.0  # 归一化 (最大倍率3.0)
+        return map_vec
+
+    def get_status_at(self, t):
         uptime, mod, done = True, 1.0, False
         if t >= self.duration: return uptime, mod, True
         if self.scenario_id == 1 and 8.0 <= t < 12.0: uptime = False
-        if self.scenario_id == 2 and 8.0 <= t < 12.0 and self.is_random_dt: uptime = False
+        if self.scenario_id == 2 and 8.0 <= t < 12.0:
+            # 这里简化处理，静态地图不包含概率性停手，只包含确定性易伤
+            # AI 需要在运行时应对概率，但易伤通常是确定的
+            pass
         if self.scenario_id == 3 and t >= self.burst_start: mod = 3.0
         return uptime, mod, done
 
+    def get_status(self, t):
+        return self.get_status_at(t)
 
+
+# ==========================================
+# 4. Gym Environment (Global View)
+# ==========================================
 class MonkEnv(gym.Env):
     def __init__(self, seed_offset=0):
-        self.observation_space = spaces.Box(low=0, high=1, shape=(16,), dtype=np.float32)
+        # Obs 结构:
+        # [0-9]: 动态状态 (能量, 真气, GCD, 5个CD, 时间, Mod) -> 10 维
+        # [10-29]: 全局地图 (Global Map) -> 20 维
+        # Total = 30
+        self.observation_space = spaces.Box(low=0, high=1, shape=(30,), dtype=np.float32)
         self.action_space = spaces.Discrete(9)
         self.action_map = {0: 'Wait', 1: 'TP', 2: 'BOK', 3: 'RSK', 4: 'SCK', 5: 'FOF', 6: 'WDP', 7: 'SOTWL', 8: 'SW'}
         self.spell_keys = list(self.action_map.values())[1:]
         self.scenario = 0
-        self.training_mode = True  # Enable RSI
         self.rng = np.random.default_rng(seed_offset)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+        if seed is not None: self.rng = np.random.default_rng(seed)
+
         self.player = PlayerState()
         self.book = SpellBook(talents=['WDP', 'SW'])
+
         if options and 'timeline' in options:
             scen_id = options['timeline']
         else:
             scen_id = self.rng.integers(0, 4)
-        self.scenario = scen_id
-        self.timeline = Timeline(scen_id)
-        self.timeline.reset()
 
-        # RSI: 训练模式下随机出生
-        if self.training_mode and (options is None):
-            self.time = self.rng.uniform(0.0, 18.0)
-        else:
-            self.time = 0.0
+        self.scenario = scen_id
+        self.timeline = Timeline(scen_id)  # 初始化时生成地图
+
+        self.time = 0.0
         return self._get_obs(), {}
 
     def _get_obs(self):
         uptime, mod, _ = self.timeline.get_status(self.time)
-        time_to_burst = 1.0
-        if self.timeline.burst_start > 0:
-            if self.time < self.timeline.burst_start:
-                time_to_burst = (self.timeline.burst_start - self.time) / 20.0
-            else:
-                time_to_burst = 0.0
+
+        # 1. Dynamic State
         norm_energy = self.player.energy / 120.0
         norm_chi = self.player.chi / 6.0
         norm_gcd = self.player.gcd_remaining / 1.5
         norm_time = self.time / 20.0
         norm_cds = [self.book.spells[k].current_cd / 30.0 for k in ['RSK', 'FOF', 'WDP', 'SOTWL', 'SW']]
-        scen_onehot = [0.0, 0.0, 0.0, 0.0]
-        scen_onehot[self.scenario] = 1.0
-        obs = [norm_energy, norm_chi, norm_gcd, *norm_cds, norm_time, 1.0 if uptime else 0.0, mod / 3.0, *scen_onehot,
-               time_to_burst]
+        norm_mod = mod / 3.0
+
+        dynamic_state = [norm_energy, norm_chi, norm_gcd, *norm_cds, norm_time, norm_mod]
+
+        # 2. Static Global Map (God View)
+        # 直接把整场战斗的剧本贴在它脸上
+        global_map = self.timeline.global_map
+
+        obs = np.concatenate((dynamic_state, global_map), axis=0)
         return np.array(obs, dtype=np.float32)
 
     def action_masks(self):
@@ -268,9 +288,12 @@ class MonkEnv(gym.Env):
         tick_dmg = self.player.tick(step_dt)
         step_damage += tick_dmg
         self.book.tick(step_dt)
+
         step_damage *= mod
         self.time += step_dt
         _, _, done = self.timeline.get_status(self.time)
+
+        # Pure Reward
         reward = step_damage
         return self._get_obs(), reward, done, False, {'damage': step_damage}
 
@@ -279,7 +302,7 @@ def mask_fn(env): return env.action_masks()
 
 
 # ==========================================
-# 4. Hardware Optimization Wrapper
+# 5. Execution
 # ==========================================
 def make_env(rank):
     def _init():
@@ -291,46 +314,28 @@ def make_env(rank):
 
 
 def run():
-    # 检查 CUDA
-    device = get_device("auto")
-    print(f">>> 硬件检测: 正在使用 {device}")
-    if device.type == 'cuda':
-        print(f">>> GPU: {torch.cuda.get_device_name(0)}")
-
-    # [极限压榨] 开 24 个进程 (9800X3D 是8核16线程，Python多进程开多点没事，能掩盖等待)
-    num_cpu = 24
-    print(f">>> 初始化大规模并行环境 ({num_cpu} Envs)...")
+    print(f">>> 初始化全知全能环境 (Global Timeline View)...")
+    num_cpu = 16
     env = SubprocVecEnv([make_env(i) for i in range(num_cpu)])
 
-    # [网络升级] 暴力加宽网络，强迫GPU干活
-    # [Batch Size] 拉满到 16384 (4096 steps * 4 mini-batches)
-    # [Ent Coef] 0.05 保持高探索
-    print(">>> 配置重型 PPO 模型 (Large Net, Huge Batch)...")
     model = MaskablePPO(
         "MlpPolicy",
         env,
         verbose=1,
-        device="cuda",  # 强制 CUDA
-        gamma=1.0,  # 纯粹的数学最优
+        gamma=1.0,
         learning_rate=3e-4,
-        ent_coef=0.05,  # 高探索
-        n_steps=2048,  # 每个环境跑2048步才更新一次 (总buffer = 2048 * 24 = 49152)
-        batch_size=4096,  # 每次喂给GPU 4096条数据
-        n_epochs=10,  # 每次更新反复榨干数据 10 遍
-        policy_kwargs=dict(
-            net_arch=[512, 512, 512]  # 三层512的大网络，这下4080得动一动了
-        )
+        ent_coef=0.01,
+        n_steps=1024,
+        batch_size=2048,
+        policy_kwargs=dict(net_arch=[256, 256])  # 标准网络即可
     )
 
-    # [海量训练] 500万步！
-    # 由于并行度高，这其实跑得很快
-    print(">>> 开始极限训练 (Steps: 5,000,000)...")
-    model.learn(total_timesteps=5000000)
+    # 30万步足以收敛，因为不需要"猜"了
+    print(">>> 开始训练 (Steps: 300,000)...")
+    model.learn(total_timesteps=300000)
 
-    # --- Evaluation ---
-    print("\n>>> 训练完成，开始评估...")
+    print("\n>>> 评估结果...")
     eval_env = MonkEnv()
-    eval_env.training_mode = False  # 关闭 RSI，正常从0开始
     eval_env = ActionMasker(eval_env, mask_fn)
 
     scenarios = [(0, "Patchwerk"), (3, "Execute (End +200%)")]
@@ -366,5 +371,4 @@ def run():
 
 
 if __name__ == '__main__':
-    # Windows 必须加这行
     run()
