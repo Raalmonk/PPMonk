@@ -1,6 +1,4 @@
-"""Spell and spell book definitions for PPMonk."""
-
-from .talents import TALENT_DB
+from .talents import TalentManager
 
 
 class Spell:
@@ -20,7 +18,7 @@ class Spell:
         self.tick_coeff = ap_coeff / ticks if ticks > 0 else ap_coeff
         self.req_talent = req_talent
         self.gcd_override = gcd_override
-        self.is_known = True
+        self.is_known = not req_talent  # 默认为 True，除非需要天赋
         self.current_cd = 0.0
         self.is_combo_strike = True
 
@@ -50,8 +48,6 @@ class Spell:
         if player.energy < self.energy_cost:
             return False
         if player.chi < self.chi_cost:
-            return False
-        if player.is_channeling:
             return False
         return True
 
@@ -101,10 +97,8 @@ class Spell:
 
 
 class SpellWDP(Spell):
-    def is_usable(self, player, other_spells=None):
-        if not super().is_usable(player, other_spells):
-            return False
-        if other_spells is None:
+    def is_usable(self, player, other_spells):
+        if not super().is_usable(player):
             return False
         rsk = other_spells['RSK']
         fof = other_spells['FOF']
@@ -112,38 +106,24 @@ class SpellWDP(Spell):
 
 
 class SpellBook:
-    def __init__(self, active_talents=None, talents=None):
-        if active_talents is None and talents is not None:
-            active_talents = talents
-        self.active_talents = active_talents if active_talents else []
-
+    def __init__(self, active_talents=None):
         self.spells = {
             'TP': Spell('TP', 0.88, energy=50, chi_gen=2),
             'BOK': Spell('BOK', 3.56, chi_cost=1),
             'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
             'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
-            'FOF': Spell('FOF', 3.00 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0, cast_haste=True),
+            'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0, cast_haste=True),
+            # Talent Spells (req_talent=True)
             'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True),
             'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True),
             'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4)
         }
-
-        for spell in self.spells.values():
-            if spell.req_talent:
-                spell.is_known = spell.abbr in self.active_talents
-            else:
-                spell.is_known = True
+        self.active_talents = active_talents if active_talents else []
+        self.talent_manager = TalentManager()
 
     def apply_talents(self, player):
-        """应用选中的天赋"""
-        for talent_name in self.active_talents:
-            if talent_name in TALENT_DB:
-                talent = TALENT_DB[talent_name]
-                talent.apply(player, self)
-
-            if talent_name == 'Ascension':
-                TALENT_DB['Ascension_Regen'].apply(player, self)
+        self.talent_manager.apply_talents(self.active_talents, player, self)
 
     def tick(self, dt):
-        for spell in self.spells.values():
-            spell.tick_cd(dt)
+        for s in self.spells.values():
+            s.tick_cd(dt)

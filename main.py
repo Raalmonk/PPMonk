@@ -12,9 +12,9 @@ def mask_fn(env):
     return env.action_masks()
 
 
-def make_env(rank):
+def make_env(rank, current_talents):
     def _init():
-        env = MonkEnv(seed_offset=rank)
+        env = MonkEnv(seed_offset=rank, current_talents=current_talents)
         env = ActionMasker(env, mask_fn)
         return env
 
@@ -24,8 +24,11 @@ def make_env(rank):
 def run():
     print(">>> 初始化 PPMonk (Refactored + Talent System)...")
 
+    # 在这里切换天赋组合即可测试不同流派
+    current_talents = ['WDP', 'SW', 'Ascension']
+
     num_cpu = 16
-    env = SubprocVecEnv([make_env(i) for i in range(num_cpu)])
+    env = SubprocVecEnv([make_env(i, current_talents) for i in range(num_cpu)])
 
     model = MaskablePPO(
         "MlpPolicy",
