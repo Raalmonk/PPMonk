@@ -125,7 +125,9 @@ class Spell:
             player.gcd_remaining = 1.0
 
         # Determine Mastery Trigger BEFORE updating last_spell_name
-        triggers_mastery = self.is_combo_strike and (player.last_spell_name != self.abbr)
+        triggers_mastery = self.is_combo_strike \
+                           and (player.last_spell_name is not None) \
+                           and (player.last_spell_name != self.abbr)
 
         # 4. Update State
         player.last_spell_name = self.abbr
@@ -173,6 +175,7 @@ class SpellWDP(Spell):
 
 class SpellBook:
     def __init__(self, talents):
+        self.talents = talents
         self.spells = {
             'TP': Spell('TP', 0.88, energy=50, chi_gen=2),
             'BOK': Spell('BOK', 3.56, chi_cost=1),
@@ -291,8 +294,19 @@ def mask_fn(env): return env.action_masks()
 
 def run():
     print(">>> 初始化训练环境 (Fixed Chi & Mastery)...")
-    env = MonkEnv()
-    env = ActionMasker(env, mask_fn)
+    base_env = MonkEnv()
+    base_env.reset()
+
+    player = base_env.player
+    print(">>> Player Attributes:")
+    print(f"    Haste: {player.haste * 100:.2f}% (Rating: {player.rating_haste})")
+    print(f"    Mastery: {player.mastery * 100:.2f}% (Rating: {player.rating_mastery})")
+    print(f"    Versatility: {player.versatility * 100:.2f}% (Rating: {player.rating_vers})")
+
+    talents = getattr(base_env.book, 'talents', [])
+    print(f">>> Active Talents: {', '.join(talents) if talents else 'None'}")
+
+    env = ActionMasker(base_env, mask_fn)
     model = MaskablePPO("MlpPolicy", env, verbose=1, gamma=0.99, learning_rate=3e-4)
     print(">>> 开始训练 (Steps: 80k)...")
     model.learn(total_timesteps=80000)
