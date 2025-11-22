@@ -6,40 +6,52 @@ from sb3_contrib.common.wrappers import ActionMasker
 
 
 # ==========================================
-# 1. Core: Player State (纯净版)
+# 1. Core: Player State (修复 Crit 属性缺失)
 # ==========================================
 class PlayerState:
-    def __init__(self, rating_haste=1500, rating_mastery=1000, rating_vers=500):
-        # 移除 Attack Power，我们只关心机制
+    def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500):
+        # [修复] 加回 rating_crit
+        self.rating_crit = rating_crit
         self.rating_haste = rating_haste
         self.rating_mastery = rating_mastery
         self.rating_vers = rating_vers
 
         self.base_mastery = 0.19
+        self.base_crit = 0.10  # [修复] 基础暴击 10%
 
         self.max_energy = 120.0
         self.energy = 120.0
         self.max_chi = 6
-        self.chi = 2  # 起手2豆
+        self.chi = 2
 
         self.last_spell_name = None
         self.gcd_remaining = 0.0
+
         self.is_channeling = False
         self.current_channel_spell = None
         self.channel_time_remaining = 0.0
         self.channel_ticks_remaining = 0
         self.time_until_next_tick = 0.0
         self.channel_tick_interval = 0.0
+
         self.channel_mastery_snapshot = False
+
+        # [修复] 初始化 self.crit
+        self.crit = 0.0
+        self.versatility = 0.0
+        self.haste = 0.0
+        self.mastery = 0.0
 
         self.update_stats()
 
     def update_stats(self):
-        # 移除 Crit (随机性干扰训练)
+        # [修复] 计算面板暴击 (Rating / 4600 + Base)
+        self.crit = (self.rating_crit / 4600.0) + self.base_crit
+
         self.versatility = (self.rating_vers / 5400.0)
         self.haste = (self.rating_haste / 4400.0)
 
-        # 精通递减逻辑
+        # Mastery DR Logic
         dr_threshold = 1380
         eff_mast_rating = self.rating_mastery
         if self.rating_mastery > dr_threshold:
@@ -48,35 +60,39 @@ class PlayerState:
         self.mastery = (eff_mast_rating / 2000.0) + self.base_mastery
 
     def tick(self, delta_time):
-        regen = 10.0 * (1.0 + self.haste)
-        self.energy = min(self.max_energy, self.energy + regen * delta_time)
+        regen_rate = 10.0 * (1.0 + self.haste)
+        self.energy = min(self.max_energy, self.energy + regen_rate * delta_time)
+
         self.gcd_remaining = max(0, self.gcd_remaining - delta_time)
 
         tick_damage = 0
         if self.is_channeling:
             self.channel_time_remaining -= delta_time
             self.time_until_next_tick -= delta_time
+
             if self.time_until_next_tick <= 0:
                 if self.channel_ticks_remaining > 0:
                     spell = self.current_channel_spell
                     tick_damage = spell.calculate_tick_damage(self)
                     self.channel_ticks_remaining -= 1
                     self.time_until_next_tick += self.channel_tick_interval
+
             if self.channel_time_remaining <= 0 or self.channel_ticks_remaining <= 0:
                 self.is_channeling = False
                 self.current_channel_spell = None
                 self.channel_mastery_snapshot = False
+
         return tick_damage
 
 
 # ==========================================
-# 2. Core: Spell Book (纯AP版)
+# 2. Core: Spell Book
 # ==========================================
 class Spell:
     def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
                  cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None):
         self.abbr = abbr
-        self.ap_coeff = ap_coeff  # e.g., 0.88
+        self.ap_coeff = ap_coeff
         self.energy_cost = energy
         self.chi_cost = chi_cost
         self.chi_gen = chi_gen
@@ -128,35 +144,28 @@ class Spell:
             player.channel_ticks_remaining = self.total_ticks
             player.channel_tick_interval = cast_t / self.total_ticks
             player.time_until_next_tick = player.channel_tick_interval
+
             player.channel_mastery_snapshot = triggers_mastery
-            return 0
+            return 0.0
         else:
             return self.calculate_tick_damage(player, mastery_override=triggers_mastery)
 
     def calculate_tick_damage(self, player, mastery_override=None):
-        # --- 纯 AP 计算模式 ---
-        # 直接使用系数，移除 attack_power
         dmg = self.tick_coeff
 
-        # 精通: 组合拳 (保留机制)
         apply_mastery = False
-
         if mastery_override is not None:
             apply_mastery = mastery_override
         elif self.is_channeled:
             apply_mastery = player.channel_mastery_snapshot
-        else:
-            apply_mastery = self.is_combo_strike and \
-                           (player.last_spell_name is not None) and \
-                           (player.last_spell_name != self.abbr)
 
         if apply_mastery:
             dmg *= (1.0 + player.mastery)
 
-        # 全能 (保留机制)
         dmg *= (1.0 + player.versatility)
 
-        # 移除 Crit (移除随机性)
+        # [注] 这里没有乘 crit，因为我们要的是纯 AP 系数作为奖励
+        # 如果你需要模拟真实期望伤害，可以在这里 return dmg * (1 + player.crit)
         return dmg
 
     def tick_cd(self, dt):
@@ -178,24 +187,25 @@ class SpellBook:
             'BOK': Spell('BOK', 3.56, chi_cost=1),
             'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
             'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
-            'FOF': Spell('FOF', 10.35, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0,
+            'FOF': Spell('FOF', 3.00 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0,
                          cast_haste=True),
             'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True),
             'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True),
             'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4)
         }
+        self.talents = talents
         for s in self.spells.values():
-            if s.req_talent and s.abbr not in talents:
-                s.is_known = False
+            if s.req_talent:
+                s.is_known = (s.abbr in talents)
             else:
-                if s.req_talent: s.is_known = True
+                s.is_known = True
 
     def tick(self, dt):
         for s in self.spells.values(): s.tick_cd(dt)
 
 
 # ==========================================
-# 3. Core: Timeline
+# 3. Timeline & Env
 # ==========================================
 class Timeline:
     def __init__(self, scenario_id):
@@ -215,9 +225,6 @@ class Timeline:
         return uptime, mod, done
 
 
-# ==========================================
-# 4. Gym Environment (Improved)
-# ==========================================
 class MonkEnv(gym.Env):
     def __init__(self):
         self.observation_space = spaces.Box(low=0, high=1000, shape=(14,), dtype=np.float32)
@@ -230,7 +237,6 @@ class MonkEnv(gym.Env):
         super().reset(seed=seed)
         self.player = PlayerState()
         self.book = SpellBook(talents=['WDP', 'SW'])
-
         scen_id = options['timeline'] if options else np.random.randint(0, 4)
         self.timeline = Timeline(scen_id)
         self.timeline.reset()
@@ -257,7 +263,6 @@ class MonkEnv(gym.Env):
         if not uptime: return [True] + [False] * 8
         if self.player.gcd_remaining > 0: return [True] + [False] * 8
         if self.player.is_channeling: return [True] + [False] * 8
-
         masks = [True] * 9
         for i, key in enumerate(self.spell_keys):
             masks[i + 1] = self.book.spells[key].is_usable(self.player, self.book.spells)
@@ -268,34 +273,22 @@ class MonkEnv(gym.Env):
         total_damage = 0
         uptime, mod, _ = self.timeline.get_status(self.time)
 
-        # Action
         if action_idx > 0:
             key = self.action_map[action_idx]
             dmg = self.book.spells[key].cast(self.player)
             total_damage += dmg
 
-        # Tick
         tick_dmg = self.player.tick(step_dt)
         total_damage += tick_dmg
         self.book.tick(step_dt)
-
         total_damage *= mod
         self.time += step_dt
         _, _, done = self.timeline.get_status(self.time)
 
         reward = total_damage
-
-        # --- Reward Shaping (核心修改: 适配 AP% 数值体系) ---
-        # 现在的伤害量级是 1.0 - 15.0 左右
-        # TP 的基础伤害是 0.88 (AP%)
-        # 我们给它 +2.0 的奖励 (相当于送了 200% AP 的伤害)
-        # 这个诱惑力非常大 (0.88 -> 2.88)，比 Wait (0) 强太多
-        if action_idx == 1 and self.player.chi <= 3:
-            reward += 2.0
-
-            # 溢出惩罚也对应调整
-        if action_idx == 1 and self.player.chi >= 5:
-            reward -= 2.0
+        if action_idx == 1 and self.player.chi <= 3: reward += 2.0
+        if action_idx == 1 and self.player.chi >= 5: reward -= 2.0
+        if action_idx == 5: reward += 5.0
 
         return self._get_obs(), reward, done, False, {'damage': total_damage}
 
@@ -304,20 +297,32 @@ def mask_fn(env): return env.action_masks()
 
 
 def run():
-    print(">>> 初始化训练环境 (Pure AP Mode)...")
+    print(">>> 初始化训练环境 (Crit Attribute Added)...")
     env = MonkEnv()
-    env = ActionMasker(env, mask_fn)
 
+    # Init player for printing
+    env.reset()
+    p = env.unwrapped.player
+    talents = env.unwrapped.book.talents
+    print(f"{'=' * 40}")
+    print(f"PLAYER STATS:")
+    print(f"  Haste: {p.haste * 100:.2f}%")
+    print(f"  Crit : {p.crit * 100:.2f}%")  # 现在这行可以正常工作了
+    print(f"  Mast : {p.mastery * 100:.2f}%")
+    print(f"  Vers : {p.versatility * 100:.2f}%")
+    print(f"  Talents: {talents}")
+    print(f"{'=' * 40}\n")
+
+    env = ActionMasker(env, mask_fn)
     model = MaskablePPO("MlpPolicy", env, verbose=1, gamma=0.99, learning_rate=3e-4)
-    print(">>> 开始训练 (Steps: 60k)...")
-    model.learn(total_timesteps=60000)
+    print(">>> 开始训练 (Steps: 80k)...")
+    model.learn(total_timesteps=80000)
 
     scenarios = [(0, "Patchwerk"), (3, "Execute (End +200%)")]
 
     for scen_id, name in scenarios:
         print(f"\n{'=' * 30}\nTesting Scenario: {name}\n{'=' * 30}")
         obs, _ = env.reset(options={'timeline': scen_id})
-        # 打印列名：AP% 代表 Attack Power %
         print(f"{'Time':<6} | {'Action':<8} | {'Chi':<3} | {'Eng':<4} | {'AP%':<6}")
 
         done = False
@@ -332,21 +337,12 @@ def run():
 
             obs, reward, done, _, info = env.step(action_item)
             dmg = info['damage']
-
             act_name = env.unwrapped.action_map[action_item]
 
-            # Log Logic
             if action_item != 0:
-                # 显示 AP 系数
                 print(f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
             elif dmg > 0:
                 print(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
-            elif int(t_now * 10) % 10 == 0:
-                # 打印 Wait 状态，确认是否发呆
-                # 只有当 GCD 转好且没动作时，才算真正的“发呆”
-                gcd_rem = env.unwrapped.player.gcd_remaining
-                if gcd_rem <= 0.001:
-                    print(f"{t_now:<6.1f} | {'Wait...':<8} | {int(chi):<3} | {int(en):<4} | {0.0:<6.2f}")
 
 
 if __name__ == '__main__':
