@@ -5,7 +5,7 @@ from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 
 # ==========================================
-# 1. Core: Player State (属性与数值)
+# 1. Core: Player State
 # ==========================================
 class PlayerState:
     def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500):
@@ -56,30 +56,26 @@ class PlayerState:
     def tick(self, delta_time):
         regen_rate = 10.0 * (1.0 + self.haste)
         self.energy = min(self.max_energy, self.energy + regen_rate * delta_time)
-        
         self.gcd_remaining = max(0, self.gcd_remaining - delta_time)
         
         tick_damage = 0
         if self.is_channeling:
             self.channel_time_remaining -= delta_time
             self.time_until_next_tick -= delta_time
-            
             if self.time_until_next_tick <= 0:
                 if self.channel_ticks_remaining > 0:
                     spell = self.current_channel_spell
                     tick_damage = spell.calculate_tick_damage(self)
                     self.channel_ticks_remaining -= 1
                     self.time_until_next_tick += self.channel_tick_interval
-            
             if self.channel_time_remaining <= 0 or self.channel_ticks_remaining <= 0:
                 self.is_channeling = False
                 self.current_channel_spell = None
                 self.channel_mastery_snapshot = False 
-                
         return tick_damage
 
 # ==========================================
-# 2. Core: Spell Book (修正逻辑与数值)
+# 2. Core: Spell Book
 # ==========================================
 class Spell:
     def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False, 
@@ -114,16 +110,13 @@ class Spell:
         player.energy -= self.energy_cost
         player.chi = max(0, player.chi - self.chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen)
-        
         cd_val = self.base_cd / (1.0 + player.haste) if self.cd_haste else self.base_cd
         self.current_cd = cd_val
-        
         if self.gcd_override is not None:
             player.gcd_remaining = self.gcd_override
         else:
             player.gcd_remaining = 1.0
             
-        # [核心逻辑] 必须有上一技能且不同，才触发精通
         triggers_mastery = self.is_combo_strike and \
                            (player.last_spell_name is not None) and \
                            (player.last_spell_name != self.abbr)
@@ -138,7 +131,6 @@ class Spell:
             player.channel_ticks_remaining = self.total_ticks
             player.channel_tick_interval = cast_t / self.total_ticks
             player.time_until_next_tick = player.channel_tick_interval
-            
             player.channel_mastery_snapshot = triggers_mastery
             return 0.0 
         else:
@@ -146,16 +138,13 @@ class Spell:
 
     def calculate_tick_damage(self, player, mastery_override=None):
         dmg = self.tick_coeff
-        
         apply_mastery = False
         if mastery_override is not None:
             apply_mastery = mastery_override
         elif self.is_channeled:
             apply_mastery = player.channel_mastery_snapshot
-            
         if apply_mastery: 
             dmg *= (1.0 + player.mastery)
-            
         dmg *= (1.0 + player.versatility)
         return dmg
 
@@ -176,11 +165,9 @@ class SpellBook:
             'BOK': Spell('BOK', 3.56, chi_cost=1),
             'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
             'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
-            # [数值还原] 207% * 5
             'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0, cast_haste=True),
             'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True),
             'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True),
-            # [数值还原] 8.96
             'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4)
         }
         self.talents = talents
@@ -189,12 +176,11 @@ class SpellBook:
                 s.is_known = (s.abbr in talents)
             else:
                 s.is_known = True
-
     def tick(self, dt):
         for s in self.spells.values(): s.tick_cd(dt)
 
 # ==========================================
-# 3. Timeline & Env
+# 3. Timeline & Env (RSI Support)
 # ==========================================
 class Timeline:
     def __init__(self, scenario_id):
@@ -211,39 +197,48 @@ class Timeline:
     def get_status(self, t):
         uptime, mod, done = True, 1.0, False
         if t >= self.duration: return uptime, mod, True
-        
         if self.scenario_id == 1 and 8.0 <= t < 12.0: uptime = False
         if self.scenario_id == 2 and 8.0 <= t < 12.0 and self.is_random_dt: uptime = False
-        
-        if self.scenario_id == 3 and t >= self.burst_start:
-            mod = 3.0
-            
+        if self.scenario_id == 3 and t >= self.burst_start: mod = 3.0
         return uptime, mod, done
 
 class MonkEnv(gym.Env):
     def __init__(self):
-        # Obs: Normalized features + TimeToBurst + OneHot
         self.observation_space = spaces.Box(low=0, high=1, shape=(16,), dtype=np.float32)
         self.action_space = spaces.Discrete(9)
         self.action_map = {0: 'Wait', 1:'TP', 2:'BOK', 3:'RSK', 4:'SCK', 5:'FOF', 6:'WDP', 7:'SOTWL', 8:'SW'}
         self.spell_keys = list(self.action_map.values())[1:]
         self.scenario = 0
+        self.training_mode = True # Flag for RSI
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.player = PlayerState()
         self.book = SpellBook(talents=['WDP', 'SW']) 
+        
         scen_id = options['timeline'] if options else np.random.randint(0, 4)
         self.scenario = scen_id 
         self.timeline = Timeline(scen_id)
         self.timeline.reset()
-        self.time = 0.0
+        
+        # [核心修改: Random State Initialization]
+        # 在训练模式下，随机从 0-18秒 之间开始。
+        # 这样 AI 就会经常遇到 "只剩2秒就进易伤" 的情况，从而轻松学会等待。
+        # 在验证模式下（options不为空或明确指定），应该从0开始。
+        
+        if self.training_mode and (options is None):
+            # Random start time between 0 and 18s
+            self.time = np.random.uniform(0.0, 18.0)
+            # 注意：这里我们简化处理，不随机化CD和资源，假设是"从天而降"的状态。
+            # 虽然不完全真实，但足够让 Critic 学习到 "Time=16+SW_Ready" 的巨大价值。
+        else:
+            self.time = 0.0
+            
         return self._get_obs(), {}
 
     def _get_obs(self):
         uptime, mod, _ = self.timeline.get_status(self.time)
         
-        # Feature: Time To Burst (Countdown)
         time_to_burst = 1.0
         if self.timeline.burst_start > 0:
             if self.time < self.timeline.burst_start:
@@ -263,19 +258,10 @@ class MonkEnv(gym.Env):
             self.book.spells['SOTWL'].current_cd / 30.0,
             self.book.spells['SW'].current_cd / 30.0,
         ]
-        
         scen_onehot = [0.0, 0.0, 0.0, 0.0]
         scen_onehot[self.scenario] = 1.0
         
-        obs = [
-            norm_energy, norm_chi, norm_gcd, 
-            *norm_cds, 
-            norm_time, 
-            1.0 if uptime else 0.0, 
-            mod / 3.0,
-            *scen_onehot,
-            time_to_burst
-        ]
+        obs = [norm_energy, norm_chi, norm_gcd, *norm_cds, norm_time, 1.0 if uptime else 0.0, mod / 3.0, *scen_onehot, time_to_burst]
         return np.array(obs, dtype=np.float32)
 
     def action_masks(self):
@@ -308,9 +294,8 @@ class MonkEnv(gym.Env):
         self.time += step_dt
         _, _, done = self.timeline.get_status(self.time)
         
-        # [核心改动] 移除所有 Reward Shaping
-        # 奖励 = 纯伤害 (AP系数)
-        # 我们相信 PPO 能通过 Gamma 发现长期价值
+        # [纯净模式] 移除所有人工引导 (+2.0, -2.0 等全部删掉)
+        # 只靠纯伤害作为奖励
         reward = step_damage 
 
         return self._get_obs(), reward, done, False, {'damage': step_damage}
@@ -318,10 +303,12 @@ class MonkEnv(gym.Env):
 def mask_fn(env): return env.action_masks()
 
 def run():
-    print(">>> 初始化训练环境 (Pure RL: No Hand-holding)...")
+    print(">>> 初始化训练环境 (RSI + Pure Reward)...")
     env = MonkEnv()
+    env.training_mode = True # Enable random starts
     
-    env.reset()
+    # Print Stats
+    env.reset(options={'timeline': 0}) # Force normal reset for printing
     p = env.unwrapped.player
     talents = env.unwrapped.book.talents
     print(f"{'='*40}")
@@ -335,20 +322,22 @@ def run():
     
     env = ActionMasker(env, mask_fn)
     
-    # Gamma = 0.9995: 视野极远
-    # Entropy = 0.03: 增加随机探索
+    # Gamma 0.999 is crucial for seeing 160 steps ahead
     model = MaskablePPO(
         "MlpPolicy", 
         env, 
         verbose=1, 
-        gamma=0.9995, 
+        gamma=0.999, 
         learning_rate=3e-4,
-        ent_coef=0.03
+        ent_coef=0.03 # Encourage exploration
     )
     
-    # [Increased Steps] 40万步，给它足够的时间去撞墙、去顿悟
-    print(">>> 开始训练 (Steps: 400k)...")
-    model.learn(total_timesteps=400000) 
+    print(">>> 开始训练 (Steps: 500k)...")
+    model.learn(total_timesteps=500000) 
+    
+    # --- Evaluation Phase (Disable RSI) ---
+    print("\n>>> 开始评估 (RSI Disabled)...")
+    env.unwrapped.training_mode = False 
     
     scenarios = [(0, "Patchwerk"), (3, "Execute (End +200%)")]
     
@@ -371,7 +360,6 @@ def run():
             obs, reward, done, _, info = env.step(action_item)
             dmg = info['damage']
             total_ap += dmg
-            
             act_name = env.unwrapped.action_map[action_item]
             
             if action_item != 0:
