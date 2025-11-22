@@ -7,7 +7,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import get_device
 
 # ==========================================
-# 1. Core Classes (Fixed Logic)
+# 1. Core Classes (Unchanged)
 # ==========================================
 class PlayerState:
     def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500):
@@ -47,7 +47,6 @@ class PlayerState:
             eff_mast_rating = dr_threshold + (excess * 0.9)
         self.mastery = (eff_mast_rating / 2000.0) + self.base_mastery
 
-    # [核心修复] 正确处理时间流逝
     def advance_time(self, duration):
         total_damage = 0
         dt = 0.01 
@@ -56,19 +55,13 @@ class PlayerState:
         
         while elapsed < duration:
             step = min(dt, duration - elapsed)
-            
-            # 1. 能量回复
             self.energy = min(self.max_energy, self.energy + regen_rate * step)
-            
-            # 2. [修复] GCD 冷却
             if self.gcd_remaining > 0:
                 self.gcd_remaining = max(0, self.gcd_remaining - step)
             
-            # 3. 引导伤害
             if self.is_channeling:
                 self.channel_time_remaining -= step
                 self.time_until_next_tick -= step
-                
                 if self.time_until_next_tick <= 1e-6:
                     if self.channel_ticks_remaining > 0:
                         spell = self.current_channel_spell
@@ -76,12 +69,10 @@ class PlayerState:
                         total_damage += tick_dmg
                         self.channel_ticks_remaining -= 1
                         self.time_until_next_tick += self.channel_tick_interval
-                
                 if self.channel_time_remaining <= 1e-6 or self.channel_ticks_remaining <= 0:
                     self.is_channeling = False
                     self.current_channel_spell = None
                     self.channel_mastery_snapshot = False
-            
             elapsed += step
         return total_damage
 
@@ -118,10 +109,9 @@ class Spell:
         if not self.is_channeled or self.total_ticks <= 0: return 0
         return self.get_effective_cast_time(player) / self.total_ticks
 
-    def is_usable(self, player):
+    def is_usable(self, player, other_spells=None):
         if not self.is_known: return False
-        # [修改] CD 检查稍微宽松一点，允许 step 函数里的自动等待逻辑处理微小CD
-        if self.current_cd > 20.0: return False # CD太长肯定不能用
+        if self.current_cd > 0.01: return False 
         if player.energy < self.energy_cost: return False
         if player.chi < self.chi_cost: return False
         return True
@@ -130,7 +120,6 @@ class Spell:
         player.energy -= self.energy_cost
         player.chi = max(0, player.chi - self.chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen)
-        
         self.current_cd = self.get_effective_cd(player)
         
         if self.gcd_override is not None:
@@ -195,7 +184,7 @@ class SpellBook:
         for s in self.spells.values(): s.tick_cd(dt)
 
 # ==========================================
-# 3. Timeline (God View)
+# 3. Timeline & Env
 # ==========================================
 class Timeline:
     def __init__(self, scenario_id):
@@ -203,14 +192,14 @@ class Timeline:
         self.duration = 20.0
         self.burst_start = -1.0
         if scenario_id == 3: self.burst_start = 16.0
-        
-        # [Global Map] 20秒的伤害倍率地图
         self.global_map = np.zeros(20, dtype=np.float32)
         for i in range(20):
             t = float(i)
             mod = 1.0
             if scenario_id == 3 and t >= self.burst_start: mod = 3.0
-            self.global_map[i] = mod / 3.0 # 归一化
+            self.global_map[i] = mod / 3.0
+    
+    def reset(self): pass
 
     def get_status(self, t):
         mod = 1.0
@@ -219,12 +208,17 @@ class Timeline:
 
 class MonkEnv(gym.Env):
     def __init__(self, seed_offset=0):
-        # Obs: 10 (Dynamic) + 20 (Map) = 30
-        self.observation_space = spaces.Box(low=0, high=1, shape=(30,), dtype=np.float32)
+        # Obs: Base(17) + GlobalMap(20) + SafetyVector(5) = 42
+        self.observation_space = spaces.Box(low=0, high=1, shape=(42,), dtype=np.float32)
         self.action_space = spaces.Discrete(9)
         self.action_map = {0: 'Wait', 1:'TP', 2:'BOK', 3:'RSK', 4:'SCK', 5:'FOF', 6:'WDP', 7:'SOTWL', 8:'SW'}
         self.spell_keys = list(self.action_map.values())[1:]
+        
+        # 这里的顺序对应 Safety Vector 的 5 个技能
+        self.major_cds = ['RSK', 'FOF', 'WDP', 'SOTWL', 'SW']
+        
         self.scenario = 0
+        self.training_mode = True
         self.rng = np.random.default_rng(seed_offset)
 
     def reset(self, seed=None, options=None):
@@ -238,99 +232,162 @@ class MonkEnv(gym.Env):
             scen_id = self.rng.integers(0, 4)
         self.scenario = scen_id 
         self.timeline = Timeline(scen_id)
-        self.time = 0.0
+        self.timeline.reset()
+        
+        if self.training_mode and (options is None):
+            self.time = self.rng.uniform(0.0, 18.0)
+            self.player.energy = self.rng.uniform(0.0, 120.0)
+            self.player.chi = self.rng.integers(0, 7)
+        else:
+            self.time = 0.0
         return self._get_obs(), {}
 
     def _get_obs(self):
         uptime, mod, _ = self.timeline.get_status(self.time)
+        
+        time_to_burst = 1.0
+        burst_start = self.timeline.burst_start
+        if burst_start > 0:
+            if self.time < burst_start:
+                time_to_burst = (burst_start - self.time) / 20.0
+            else:
+                time_to_burst = 0.0 
+        
+        # [核心增强] Math Injection: Calculate Safety for Major CDs
+        # "如果我现在打这个技能，它能在易伤前转好吗？"
+        safety_vector = []
+        for k in self.major_cds:
+            spell = self.book.spells[k]
+            is_safe = 1.0
+            
+            # 只有在 scenario 3 (有易伤) 且 还没进易伤 时才需要判断
+            if self.scenario == 3 and self.time < burst_start:
+                cd_duration = spell.get_effective_cd(self.player)
+                ready_at = self.time + cd_duration
+                
+                # 如果转好时间 晚于 易伤开始时间 -> 危险！(0.0)
+                # (留一点余量 0.5s 给反应时间)
+                if ready_at > burst_start + 0.5:
+                    is_safe = 0.0
+            
+            safety_vector.append(is_safe)
+
+        # Base Features
         norm_energy = self.player.energy / 120.0
         norm_chi = self.player.chi / 6.0
         norm_gcd = self.player.gcd_remaining / 1.5
         norm_time = self.time / 20.0
         norm_cds = [self.book.spells[k].current_cd / 30.0 for k in ['RSK', 'FOF', 'WDP', 'SOTWL', 'SW']]
-        norm_mod = mod / 3.0
-        dynamic = [norm_energy, norm_chi, norm_gcd, *norm_cds, norm_time, norm_mod]
-        return np.concatenate((dynamic, self.timeline.global_map), axis=0).astype(np.float32)
+        scen_onehot = [0.0, 0.0, 0.0, 0.0]
+        scen_onehot[self.scenario] = 1.0
+        
+        last_action_val = 0.0
+        if self.player.last_spell_name:
+            for k, v in self.action_map.items():
+                if v == self.player.last_spell_name:
+                    last_action_val = k / 9.0
+                    break
+        
+        # 组装: Base(17) + Map(20) + Safety(5) = 42
+        obs = [norm_energy, norm_chi, norm_gcd, *norm_cds, norm_time, 1.0 if uptime else 0.0, mod / 3.0, 
+               *scen_onehot, time_to_burst, last_action_val]
+        
+        return np.concatenate((obs, self.timeline.global_map, safety_vector), axis=0).astype(np.float32)
 
     def action_masks(self):
         if self.time >= 20.0: return [False]*9
         masks = [True] * 9
-        # 注意：Event Driven 允许任何 CD < 剩余时间 的技能
-        # 但为了简单，我们只 Mask 掉完全不能用的（比如资源不够）
-        # CD check logic is inside is_usable (relaxed)
         for i, key in enumerate(self.spell_keys):
             spell = self.book.spells[key]
+            is_usable = False
             if key == 'WDP':
-                masks[i+1] = spell.is_usable(self.player, self.book.spells)
+                is_usable = spell.is_usable(self.player, self.book.spells)
             else:
-                masks[i+1] = spell.is_usable(self.player)
+                is_usable = spell.is_usable(self.player)
+            
+            # Hard Combo Rule
+            if spell.abbr == self.player.last_spell_name:
+                is_usable = False
+                
+            masks[i+1] = is_usable
         return masks
 
     def step(self, action_idx):
         total_damage = 0
         
-        # 1. 处理动作前的时间流逝 (Auto-Wait for CD/GCD)
-        # 如果选了技能，但 GCD 没转好，或者 CD 差一点点，我们快进
+        # Auto Wait
         time_to_wait = 0.0
-        
-        # GCD 锁
         if self.player.gcd_remaining > 0:
             time_to_wait = max(time_to_wait, self.player.gcd_remaining)
-            
-        # CD 锁 (如果选了技能)
         if action_idx > 0:
             key = self.action_map[action_idx]
             spell = self.book.spells[key]
             if spell.current_cd > 0:
                 time_to_wait = max(time_to_wait, spell.current_cd)
-                
-        # 执行等待 (Advance Time)
+        
         if time_to_wait > 0:
-            # 分段计算伤害，因为 mod 可能在等待期间变化
-            # 简化处理：按起点 mod 算 (误差很小)
-            _, current_mod, _ = self.timeline.get_status(self.time)
-            dmg_tick = self.player.advance_time(time_to_wait)
-            self.book.tick(time_to_wait)
-            self.time += time_to_wait
-            total_damage += dmg_tick * current_mod
+            total_damage += self._advance_time_with_mod(time_to_wait)
             
-        # 2. 执行动作
-        _, current_mod, _ = self.timeline.get_status(self.time)
         lockout = 0.0
         
-        if action_idx > 0: # Cast
+        if action_idx > 0: 
             key = self.action_map[action_idx]
             spell = self.book.spells[key]
             
-            # 施放
+            if spell.current_cd > 0.01: 
+                return self._get_obs(), -10.0, False, False, {'damage': 0}
+
             dmg = spell.cast(self.player)
+            _, current_mod, _ = self.timeline.get_status(self.time)
             total_damage += dmg * current_mod
             
-            # 计算动作占用时间
             if spell.is_channeled:
                 lockout = spell.get_effective_cast_time(self.player)
             else:
-                lockout = self.player.gcd_remaining # cast() set this to 1.0 or 0.4
-                
-        else: # Wait (Action 0)
-            lockout = 0.1 # 空过 0.1s
+                lockout = self.player.gcd_remaining
+        else: 
+            lockout = 0.1
             
-        # 3. 执行动作后的时间流逝
         if lockout > 0:
-            dmg_tick = self.player.advance_time(lockout)
-            self.book.tick(lockout)
-            self.time += lockout
-            total_damage += dmg_tick * current_mod
+            total_damage += self._advance_time_with_mod(lockout)
 
         done = self.time >= 20.0
-        reward = total_damage 
+        reward = total_damage
+        
+        # [Opener/Resource Guidance]
+        if self.player.last_spell_name is None and action_idx != 1: # 1=TP
+             reward -= 5.0
+        if action_idx == 1 and self.player.chi < 4:
+             reward += 1.0
+             
         return self._get_obs(), reward, done, False, {'damage': total_damage}
+
+    def _advance_time_with_mod(self, duration):
+        total_damage = 0
+        target_time = self.time + duration
+        burst_time = 16.0
+        
+        if self.scenario == 3 and self.time < burst_time and target_time > burst_time:
+            dt1 = burst_time - self.time
+            dmg1 = self.player.advance_time(dt1)
+            self.book.tick(dt1)
+            total_damage += dmg1 * 1.0
+            
+            dt2 = target_time - burst_time
+            dmg2 = self.player.advance_time(dt2)
+            self.book.tick(dt2)
+            total_damage += dmg2 * 3.0
+            self.time = target_time
+        else:
+            _, mod, _ = self.timeline.get_status(self.time)
+            dmg = self.player.advance_time(duration)
+            self.book.tick(duration)
+            total_damage += dmg * mod
+            self.time += duration
+        return total_damage
 
 def mask_fn(env): return env.action_masks()
 
-# ==========================================
-# 5. Execution
-# ==========================================
 def make_env(rank):
     def _init():
         env = MonkEnv(seed_offset=rank)
@@ -339,7 +396,7 @@ def make_env(rank):
     return _init
 
 def run():
-    print(f">>> 初始化上帝视角+事件驱动环境 (God View + Event Physics)...")
+    print(f">>> 初始化数学增强版 (Math Features + Hard Rules)...")
     num_cpu = 16 
     env = SubprocVecEnv([make_env(i) for i in range(num_cpu)])
     
@@ -347,6 +404,7 @@ def run():
         "MlpPolicy", 
         env, 
         verbose=1, 
+        device="cuda",
         gamma=1.0,          
         learning_rate=3e-4,
         ent_coef=0.02,
@@ -354,11 +412,12 @@ def run():
         batch_size=1024,    
     )
     
-    print(">>> 开始训练 (Steps: 500k)...")
-    model.learn(total_timesteps=500000) 
+    print(">>> 开始训练 (Steps: 1,000,000)...")
+    model.learn(total_timesteps=1000000) 
     
     print("\n>>> 评估结果...")
     eval_env = MonkEnv()
+    eval_env.training_mode = False 
     eval_env = ActionMasker(eval_env, mask_fn)
     
     scenarios = [(0, "Patchwerk"), (3, "Execute (End +200%)")]
