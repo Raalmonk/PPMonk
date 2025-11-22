@@ -3,12 +3,10 @@ from gymnasium import spaces
 import numpy as np
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
-from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.utils import get_device
-
+from stable_baselines3.common.callbacks import BaseCallback
 
 # ==========================================
-# 1. Core Logic (Player & Spell) - 保持不变
+# 1. Core Classes (保持纯净，无作弊奖励)
 # ==========================================
 class PlayerState:
     def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500):
@@ -21,8 +19,8 @@ class PlayerState:
         self.max_energy = 120.0
         self.energy = 120.0
         self.max_chi = 6
-        self.chi = 2
-        self.last_spell_name = None
+        self.chi = 2 
+        self.last_spell_name = None 
         self.gcd_remaining = 0.0
         self.is_channeling = False
         self.current_channel_spell = None
@@ -40,8 +38,8 @@ class PlayerState:
     def update_stats(self):
         self.crit = (self.rating_crit / 4600.0) + self.base_crit
         self.versatility = (self.rating_vers / 5400.0)
-        self.haste = (self.rating_haste / 4400.0)
-        dr_threshold = 1380
+        self.haste = (self.rating_haste / 4400.0) 
+        dr_threshold = 1380 
         eff_mast_rating = self.rating_mastery
         if self.rating_mastery > dr_threshold:
             excess = self.rating_mastery - dr_threshold
@@ -65,12 +63,11 @@ class PlayerState:
             if self.channel_time_remaining <= 0 or self.channel_ticks_remaining <= 0:
                 self.is_channeling = False
                 self.current_channel_spell = None
-                self.channel_mastery_snapshot = False
+                self.channel_mastery_snapshot = False 
         return tick_damage
 
-
 class Spell:
-    def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
+    def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False, 
                  cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None):
         self.abbr = abbr
         self.ap_coeff = ap_coeff
@@ -86,9 +83,9 @@ class Spell:
         self.tick_coeff = ap_coeff / ticks if ticks > 0 else ap_coeff
         self.req_talent = req_talent
         self.gcd_override = gcd_override
-        self.is_known = True
+        self.is_known = True 
         self.current_cd = 0.0
-        self.is_combo_strike = True
+        self.is_combo_strike = True 
 
     def is_usable(self, player, other_spells):
         if not self.is_known: return False
@@ -108,8 +105,7 @@ class Spell:
             player.gcd_remaining = self.gcd_override
         else:
             player.gcd_remaining = 1.0
-        triggers_mastery = self.is_combo_strike and (player.last_spell_name is not None) and (
-                    player.last_spell_name != self.abbr)
+        triggers_mastery = self.is_combo_strike and (player.last_spell_name is not None) and (player.last_spell_name != self.abbr)
         player.last_spell_name = self.abbr
         if self.is_channeled:
             cast_t = self.base_cast_time / (1.0 + player.haste) if self.cast_haste else self.base_cast_time
@@ -120,7 +116,7 @@ class Spell:
             player.channel_tick_interval = cast_t / self.total_ticks
             player.time_until_next_tick = player.channel_tick_interval
             player.channel_mastery_snapshot = triggers_mastery
-            return 0.0
+            return 0.0 
         else:
             return self.calculate_tick_damage(player, mastery_override=triggers_mastery)
 
@@ -131,14 +127,12 @@ class Spell:
             apply_mastery = mastery_override
         elif self.is_channeled:
             apply_mastery = player.channel_mastery_snapshot
-        if apply_mastery:
-            dmg *= (1.0 + player.mastery)
+        if apply_mastery: dmg *= (1.0 + player.mastery)
         dmg *= (1.0 + player.versatility)
         return dmg
 
     def tick_cd(self, dt):
         if self.current_cd > 0: self.current_cd = max(0, self.current_cd - dt)
-
 
 class SpellWDP(Spell):
     def is_usable(self, player, other_spells):
@@ -147,7 +141,6 @@ class SpellWDP(Spell):
         fof = other_spells['FOF']
         return rsk.current_cd > 0 and fof.current_cd > 0
 
-
 class SpellBook:
     def __init__(self, talents):
         self.spells = {
@@ -155,131 +148,114 @@ class SpellBook:
             'BOK': Spell('BOK', 3.56, chi_cost=1),
             'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
             'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
-            # FOF
-            'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0,
-                         cast_haste=True),
+            'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0, cast_haste=True),
             'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True),
             'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True),
             'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4)
         }
         self.talents = talents
         for s in self.spells.values():
-            if s.req_talent:
-                s.is_known = (s.abbr in talents)
-            else:
-                s.is_known = True
-
+            if s.req_talent: s.is_known = (s.abbr in talents)
+            else: s.is_known = True
     def tick(self, dt):
         for s in self.spells.values(): s.tick_cd(dt)
 
-
-# ==========================================
-# 3. Timeline (The Brain)
-# ==========================================
 class Timeline:
     def __init__(self, scenario_id):
         self.scenario_id = scenario_id
         self.duration = 20.0
+        self.is_random_dt = False
         self.burst_start = -1.0
         if scenario_id == 3: self.burst_start = 16.0
-
-        # [核心功能] 生成全图视野
-        self.global_map = self._generate_global_map()
-
-    def _generate_global_map(self):
-        # 创建一个 20 维的向量，每一位代表第 N 秒的伤害倍率
-        # Resolution: 1 second per bin
-        map_vec = np.zeros(20, dtype=np.float32)
-        for i in range(20):
-            t = float(i)
-            _, mod, _ = self.get_status_at(t)
-            map_vec[i] = mod / 3.0  # 归一化 (最大倍率3.0)
-        return map_vec
-
-    def get_status_at(self, t):
+    def reset(self):
+        self.is_random_dt = (np.random.rand() < 0.2) if self.scenario_id == 2 else False
+    def get_status(self, t):
         uptime, mod, done = True, 1.0, False
         if t >= self.duration: return uptime, mod, True
         if self.scenario_id == 1 and 8.0 <= t < 12.0: uptime = False
-        if self.scenario_id == 2 and 8.0 <= t < 12.0:
-            # 这里简化处理，静态地图不包含概率性停手，只包含确定性易伤
-            # AI 需要在运行时应对概率，但易伤通常是确定的
-            pass
+        if self.scenario_id == 2 and 8.0 <= t < 12.0 and self.is_random_dt: uptime = False
         if self.scenario_id == 3 and t >= self.burst_start: mod = 3.0
         return uptime, mod, done
 
-    def get_status(self, t):
-        return self.get_status_at(t)
-
-
-# ==========================================
-# 4. Gym Environment (Global View)
-# ==========================================
 class MonkEnv(gym.Env):
-    def __init__(self, seed_offset=0):
-        # Obs 结构:
-        # [0-9]: 动态状态 (能量, 真气, GCD, 5个CD, 时间, Mod) -> 10 维
-        # [10-29]: 全局地图 (Global Map) -> 20 维
-        # Total = 30
-        self.observation_space = spaces.Box(low=0, high=1, shape=(30,), dtype=np.float32)
+    def __init__(self):
+        # Obs 16 dims
+        self.observation_space = spaces.Box(low=0, high=1, shape=(16,), dtype=np.float32)
         self.action_space = spaces.Discrete(9)
-        self.action_map = {0: 'Wait', 1: 'TP', 2: 'BOK', 3: 'RSK', 4: 'SCK', 5: 'FOF', 6: 'WDP', 7: 'SOTWL', 8: 'SW'}
+        self.action_map = {0: 'Wait', 1:'TP', 2:'BOK', 3:'RSK', 4:'SCK', 5:'FOF', 6:'WDP', 7:'SOTWL', 8:'SW'}
         self.spell_keys = list(self.action_map.values())[1:]
         self.scenario = 0
-        self.rng = np.random.default_rng(seed_offset)
+        
+        # 课程学习控制参数
+        self.start_time_min = 0.0
+        self.start_time_max = 0.0
+        self.force_scenario_3 = False # 是否强制只练 Scenario 3
+
+    def set_curriculum(self, start_min, start_max, force_scen3):
+        self.start_time_min = start_min
+        self.start_time_max = start_max
+        self.force_scenario_3 = force_scen3
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        if seed is not None: self.rng = np.random.default_rng(seed)
-
         self.player = PlayerState()
-        self.book = SpellBook(talents=['WDP', 'SW'])
-
+        self.book = SpellBook(talents=['WDP', 'SW']) 
+        
         if options and 'timeline' in options:
             scen_id = options['timeline']
+        elif self.force_scenario_3:
+            scen_id = 3 # 强制练斩杀
         else:
-            scen_id = self.rng.integers(0, 4)
-
-        self.scenario = scen_id
-        self.timeline = Timeline(scen_id)  # 初始化时生成地图
-
-        self.time = 0.0
+            scen_id = np.random.randint(0, 4)
+            
+        self.scenario = scen_id 
+        self.timeline = Timeline(scen_id)
+        self.timeline.reset()
+        
+        # [课程学习核心] 控制出生时间
+        if options is None: # 训练模式
+            self.time = np.random.uniform(self.start_time_min, self.start_time_max)
+        else: # 评估模式
+            self.time = 0.0
+            
         return self._get_obs(), {}
 
     def _get_obs(self):
         uptime, mod, _ = self.timeline.get_status(self.time)
-
-        # 1. Dynamic State
+        
+        time_to_burst = 1.0
+        if self.timeline.burst_start > 0:
+            if self.time < self.timeline.burst_start:
+                time_to_burst = (self.timeline.burst_start - self.time) / 20.0
+            else:
+                time_to_burst = 0.0 
+        
         norm_energy = self.player.energy / 120.0
         norm_chi = self.player.chi / 6.0
         norm_gcd = self.player.gcd_remaining / 1.5
         norm_time = self.time / 20.0
         norm_cds = [self.book.spells[k].current_cd / 30.0 for k in ['RSK', 'FOF', 'WDP', 'SOTWL', 'SW']]
-        norm_mod = mod / 3.0
-
-        dynamic_state = [norm_energy, norm_chi, norm_gcd, *norm_cds, norm_time, norm_mod]
-
-        # 2. Static Global Map (God View)
-        # 直接把整场战斗的剧本贴在它脸上
-        global_map = self.timeline.global_map
-
-        obs = np.concatenate((dynamic_state, global_map), axis=0)
+        scen_onehot = [0.0, 0.0, 0.0, 0.0]
+        scen_onehot[self.scenario] = 1.0
+        
+        obs = [norm_energy, norm_chi, norm_gcd, *norm_cds, norm_time, 1.0 if uptime else 0.0, mod / 3.0, *scen_onehot, time_to_burst]
         return np.array(obs, dtype=np.float32)
 
     def action_masks(self):
         uptime, _, _ = self.timeline.get_status(self.time)
-        if not uptime: return [True] + [False] * 8
-        if self.player.gcd_remaining > 0: return [True] + [False] * 8
-        if self.player.is_channeling: return [True] + [False] * 8
+        if not uptime: return [True] + [False]*8
+        if self.player.gcd_remaining > 0: return [True] + [False]*8
+        if self.player.is_channeling: return [True] + [False]*8
         masks = [True] * 9
         for i, key in enumerate(self.spell_keys):
-            masks[i + 1] = self.book.spells[key].is_usable(self.player, self.book.spells)
+            masks[i+1] = self.book.spells[key].is_usable(self.player, self.book.spells)
         return masks
 
     def step(self, action_idx):
-        step_dt = 0.1
+        step_dt = 0.1 
         step_damage = 0
         uptime, mod, _ = self.timeline.get_status(self.time)
-
+        
         if action_idx > 0:
             key = self.action_map[action_idx]
             dmg = self.book.spells[key].cast(self.player)
@@ -288,87 +264,97 @@ class MonkEnv(gym.Env):
         tick_dmg = self.player.tick(step_dt)
         step_damage += tick_dmg
         self.book.tick(step_dt)
-
+        
         step_damage *= mod
         self.time += step_dt
         _, _, done = self.timeline.get_status(self.time)
-
-        # Pure Reward
-        reward = step_damage
+        
+        # 纯AP奖励，无作弊
+        reward = step_damage 
         return self._get_obs(), reward, done, False, {'damage': step_damage}
-
 
 def mask_fn(env): return env.action_masks()
 
-
 # ==========================================
-# 5. Execution
+# 5. Curriculum Callback & Run
 # ==========================================
-def make_env(rank):
-    def _init():
-        env = MonkEnv(seed_offset=rank)
-        env = ActionMasker(env, mask_fn)
-        return env
-
-    return _init
-
+class CurriculumCallback(BaseCallback):
+    def __init__(self, env, verbose=0):
+        super().__init__(verbose)
+        self.env = env
+        
+    def _on_step(self) -> bool:
+        # 根据训练进度调整难度
+        progress = self.num_timesteps / self.locals['total_timesteps']
+        
+        # Phase 1 (0-30%): 只练 Scenario 3, 从 15-18秒 开始 (极简模式: 脸滚键盘都有奖)
+        if progress < 0.3:
+            self.env.unwrapped.set_curriculum(start_min=15.0, start_max=18.0, force_scen3=True)
+            
+        # Phase 2 (30-60%): 只练 Scenario 3, 从 10-18秒 开始 (中等模式: 需要忍一忍)
+        elif progress < 0.6:
+            self.env.unwrapped.set_curriculum(start_min=10.0, start_max=18.0, force_scen3=True)
+            
+        # Phase 3 (60-80%): 只练 Scenario 3, 从 0-18秒 开始 (困难模式: 全程忍耐)
+        elif progress < 0.8:
+            self.env.unwrapped.set_curriculum(start_min=0.0, start_max=18.0, force_scen3=True)
+            
+        # Phase 4 (80-100%): 混合所有场景 (实战模式)
+        else:
+            self.env.unwrapped.set_curriculum(start_min=0.0, start_max=0.0, force_scen3=False)
+            
+        return True
 
 def run():
-    print(f">>> 初始化全知全能环境 (Global Timeline View)...")
-    num_cpu = 16
-    env = SubprocVecEnv([make_env(i) for i in range(num_cpu)])
-
-    model = MaskablePPO(
-        "MlpPolicy",
-        env,
-        verbose=1,
-        gamma=1.0,
-        learning_rate=3e-4,
-        ent_coef=0.01,
-        n_steps=1024,
-        batch_size=2048,
-        policy_kwargs=dict(net_arch=[256, 256])  # 标准网络即可
-    )
-
-    # 30万步足以收敛，因为不需要"猜"了
-    print(">>> 开始训练 (Steps: 300,000)...")
-    model.learn(total_timesteps=300000)
-
+    print(f">>> 初始化课程学习环境 (Phased Curriculum)...")
+    # 这里为了演示 Curriculum 逻辑简单起见，使用单线程环境
+    # 如果要并行，需要用特殊的 Wrapper 把 set_curriculum 分发给子进程
+    base_env = MonkEnv()
+    env = ActionMasker(base_env, mask_fn)
+    
+    callback = CurriculumCallback(env)
+    
+    # Gamma 0.999: 确保它在 Phase 2/3 能看懂长远利益
+    model = MaskablePPO("MlpPolicy", env, verbose=1, gamma=0.999, learning_rate=3e-4, ent_coef=0.03)
+    
+    print(">>> 开始训练 (Steps: 300k)...")
+    # 30万步足够了，因为 Phase 1 会迅速教会它 "SW留给易伤" 的价值
+    model.learn(total_timesteps=300000, callback=callback) 
+    
     print("\n>>> 评估结果...")
-    eval_env = MonkEnv()
-    eval_env = ActionMasker(eval_env, mask_fn)
-
+    # 强制从 0 秒开始评估
+    base_env.set_curriculum(start_min=0.0, start_max=0.0, force_scen3=False)
+    
     scenarios = [(0, "Patchwerk"), (3, "Execute (End +200%)")]
-
+    
     for scen_id, name in scenarios:
-        print(f"\n{'=' * 30}\nTesting Scenario: {name}\n{'=' * 30}")
-        obs, _ = eval_env.reset(options={'timeline': scen_id})
+        print(f"\n{'='*30}\nTesting Scenario: {name}\n{'='*30}")
+        obs, _ = env.reset(options={'timeline': scen_id})
         print(f"{'Time':<6} | {'Action':<8} | {'Chi':<3} | {'Eng':<4} | {'AP%':<6}")
-
+        
         total_ap = 0.0
         done = False
         while not done:
-            masks = eval_env.action_masks()
+            masks = env.action_masks()
             action, _ = model.predict(obs, action_masks=masks, deterministic=True)
             action_item = action.item()
-
-            t_now = eval_env.unwrapped.time
-            chi = eval_env.unwrapped.player.chi
-            en = eval_env.unwrapped.player.energy
-
-            obs, reward, done, _, info = eval_env.step(action_item)
+            
+            t_now = env.unwrapped.time
+            chi = env.unwrapped.player.chi
+            en = env.unwrapped.player.energy
+            
+            obs, reward, done, _, info = env.step(action_item)
             dmg = info['damage']
             total_ap += dmg
-            act_name = eval_env.unwrapped.action_map[action_item]
-
+            act_name = env.unwrapped.action_map[action_item]
+            
             if action_item != 0:
                 print(f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
-            elif dmg > 0:
+            elif dmg > 0: 
                 print(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
-
-        print(f"{'-' * 30}")
+        
+        print(f"{'-'*30}")
         print(f"Total AP Output: {total_ap:.2f}")
-
 
 if __name__ == '__main__':
     run()
