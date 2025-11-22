@@ -52,6 +52,9 @@ class PlayerState:
         self.time_until_next_tick = 0.0  # 距离下一跳还有多久
         self.channel_ticks_remaining = 0  # 剩余跳数
 
+        # 引导技能的精通快照 (组合拳判定)
+        self.channel_mastery_snapshot = False
+
     def update_secondary_stats(self):
         """
         根据 Rating 计算最终百分比，包含递减效应 (DR)。
@@ -100,8 +103,7 @@ class PlayerState:
             self.gcd_remaining = max(0, self.gcd_remaining - delta_time)
 
         # 3. 引导处理 (Channeling Logic)
-        tick_event = False  # 返回值：告诉 Env 是否发生了伤害跳
-        damage_spell = None
+        tick_damage = 0
 
         if self.is_channeling:
             self.channel_time_remaining -= delta_time
@@ -110,8 +112,8 @@ class PlayerState:
             # 判定跳伤害
             if self.time_until_next_tick <= 0:
                 if self.channel_ticks_remaining > 0:
-                    tick_event = True
-                    damage_spell = self.current_channel_spell
+                    spell = self.current_channel_spell
+                    tick_damage = spell.calculate_tick_damage(self)
                     self.channel_ticks_remaining -= 1
 
                     # 重置下一跳计时器 (加上剩余的负值以保持时间精确)
@@ -121,7 +123,7 @@ class PlayerState:
             if self.channel_time_remaining <= 0 or self.channel_ticks_remaining <= 0:
                 self.break_channel()
 
-        return tick_event, damage_spell
+        return 0, tick_damage
 
     def break_channel(self):
         """打断或结束引导"""
@@ -129,6 +131,7 @@ class PlayerState:
         self.current_channel_spell = None
         self.channel_time_remaining = 0
         self.channel_ticks_remaining = 0
+        self.channel_mastery_snapshot = False
 
     # 辅助：获取当前快照属性 (Snapshot) 用于 DoT/HoT
     # 如果以后需要动态属性 (如饰品触发)，在这个类里加一个 buffs_stats_modifier
