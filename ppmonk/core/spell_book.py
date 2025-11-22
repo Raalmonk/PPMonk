@@ -1,274 +1,328 @@
-# ppmonk/core/spell_book.py
+import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
+from sb3_contrib import MaskablePPO
+from sb3_contrib.common.wrappers import ActionMasker
 
+
+# ==========================================
+# 1. Core: Player State (Fix: Missing attribute)
+# ==========================================
+class PlayerState:
+    def __init__(self, rating_haste=1500, rating_mastery=1000, rating_vers=500):
+        self.rating_haste = rating_haste
+        self.rating_mastery = rating_mastery
+        self.rating_vers = rating_vers
+
+        self.base_mastery = 0.19
+
+        self.max_energy = 120.0
+        self.energy = 120.0
+
+        # [修复] 之前这里漏写了 self.chi，且 max_chi 写成了 2
+        self.max_chi = 6
+        self.chi = 2  # 起手2豆
+
+        self.last_spell_name = None
+        self.gcd_remaining = 0.0
+
+        # Channeling State
+        self.is_channeling = False
+        self.current_channel_spell = None
+        self.channel_time_remaining = 0.0
+        self.channel_ticks_remaining = 0
+        self.time_until_next_tick = 0.0
+        self.channel_tick_interval = 0.0
+
+        self.channel_mastery_snapshot = False
+
+        self.update_stats()
+
+    def update_stats(self):
+        self.versatility = (self.rating_vers / 5400.0)
+        self.haste = (self.rating_haste / 4400.0)
+
+        # Mastery DR Logic
+        dr_threshold = 1380
+        eff_mast_rating = self.rating_mastery
+        if self.rating_mastery > dr_threshold:
+            excess = self.rating_mastery - dr_threshold
+            eff_mast_rating = dr_threshold + (excess * 0.9)
+        self.mastery = (eff_mast_rating / 2000.0) + self.base_mastery
+
+    def tick(self, delta_time):
+        regen_rate = 10.0 * (1.0 + self.haste)
+        self.energy = min(self.max_energy, self.energy + regen_rate * delta_time)
+
+        self.gcd_remaining = max(0, self.gcd_remaining - delta_time)
+
+        tick_damage = 0
+        if self.is_channeling:
+            self.channel_time_remaining -= delta_time
+            self.time_until_next_tick -= delta_time
+
+            if self.time_until_next_tick <= 0:
+                if self.channel_ticks_remaining > 0:
+                    spell = self.current_channel_spell
+                    tick_damage = spell.calculate_tick_damage(self)
+                    self.channel_ticks_remaining -= 1
+                    self.time_until_next_tick += self.channel_tick_interval
+
+            if self.channel_time_remaining <= 0 or self.channel_ticks_remaining <= 0:
+                self.is_channeling = False
+                self.current_channel_spell = None
+                self.channel_mastery_snapshot = False
+
+        return tick_damage
+
+
+# ==========================================
+# 2. Core: Spell Book (Mastery Fixed)
+# ==========================================
 class Spell:
-    def __init__(self, abbr, name, ap_coeff,
-                 energy_cost=0, chi_cost=0, chi_gen=0,
-                 base_cd=0, cd_haste=False,
-                 base_cast_time=0, cast_haste=False,
-                 is_combo_strike=True, damage_type="Physical",
-                 is_channeled=False, total_ticks=1,
-                 gcd_override=None,
-                 req_talent=False):  # 新增: 标记该技能是否来自天赋
-
+    def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
+                 cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None):
         self.abbr = abbr
-        self.name = name
         self.ap_coeff = ap_coeff
-
-        self.energy_cost = energy_cost
+        self.energy_cost = energy
         self.chi_cost = chi_cost
         self.chi_gen = chi_gen
-
-        self.base_cd = base_cd
+        self.base_cd = cd
         self.cd_haste = cd_haste
-
-        self.base_cast_time = base_cast_time
+        self.base_cast_time = cast_time
         self.cast_haste = cast_haste
-
-        self.is_combo_strike = is_combo_strike
-        self.damage_type = damage_type
-
         self.is_channeled = is_channeled
-        self.total_ticks = total_ticks
-        self.tick_damage_coeff = ap_coeff / total_ticks if total_ticks > 0 else ap_coeff
-
-        self.gcd_override = gcd_override
-
-        # --- 天赋逻辑 ---
+        self.total_ticks = ticks
+        self.tick_coeff = ap_coeff / ticks if ticks > 0 else ap_coeff
         self.req_talent = req_talent
-        # 默认状态：如果不需要天赋，默认为True(学会)；如果需要天赋，默认为False(未学会)
-        # 这个状态会在 SpellBook 初始化时被 talent_conf 覆盖
-        self.is_known = not req_talent
-
+        self.gcd_override = gcd_override
+        self.is_known = True
         self.current_cd = 0.0
+        self.is_combo_strike = True
 
-    def get_effective_cd(self, player):
-        if self.cd_haste:
-            return self.base_cd / (1.0 + player.haste)
-        return self.base_cd
-
-    def get_effective_cast_time(self, player):
-        if self.cast_haste:
-            return self.base_cast_time / (1.0 + player.haste)
-        return self.base_cast_time
-
-    def get_tick_interval(self, player):
-        if not self.is_channeled or self.total_ticks <= 0:
-            return 0
-        total_time = self.get_effective_cast_time(player)
-        return total_time / self.total_ticks
-
-    def is_usable(self, player, other_spells=None):
-        # 0. 天赋检查 (最优先)
-        if not self.is_known:
-            return False
-
-        # 1. CD 检查
-        if self.current_cd > 1e-4: return False
-
-        # 2. 资源 检查
+    def is_usable(self, player, other_spells):
+        if not self.is_known: return False
+        if self.current_cd > 1e-2: return False
         if player.energy < self.energy_cost: return False
         if player.chi < self.chi_cost: return False
-
-        # 3. 状态 检查
         if player.is_channeling: return False
-
         return True
 
     def cast(self, player):
-        # 双重保险：防止代码直接调用 cast 强行施放未学会的技能
-        if not self.is_known:
-            return 0.0
-
+        # 1. Resource
         player.energy -= self.energy_cost
         player.chi = max(0, player.chi - self.chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen)
 
-        self.current_cd = self.get_effective_cd(player)
+        # 2. CD
+        cd_val = self.base_cd / (1.0 + player.haste) if self.cd_haste else self.base_cd
+        self.current_cd = cd_val
 
-        # GCD 处理
+        # 3. GCD
         if self.gcd_override is not None:
             player.gcd_remaining = self.gcd_override
         else:
             player.gcd_remaining = 1.0
 
-        # 精通触发判定：必须在覆盖 last_spell_name 之前完成
+        # Determine Mastery Trigger BEFORE updating last_spell_name
         triggers_mastery = self.is_combo_strike and (player.last_spell_name != self.abbr)
 
-        # 更新上一技能记录
+        # 4. Update State
         player.last_spell_name = self.abbr
 
         if self.is_channeled:
-            eff_cast_time = self.get_effective_cast_time(player)
+            cast_t = self.base_cast_time / (1.0 + player.haste) if self.cast_haste else self.base_cast_time
             player.is_channeling = True
-            player.channel_time_remaining = eff_cast_time
             player.current_channel_spell = self
+            player.channel_time_remaining = cast_t
             player.channel_ticks_remaining = self.total_ticks
-            player.channel_tick_interval = self.get_tick_interval(player)
+            player.channel_tick_interval = cast_t / self.total_ticks
             player.time_until_next_tick = player.channel_tick_interval
 
-            # 引导技能需要在施放瞬间记录是否触发了精通
             player.channel_mastery_snapshot = triggers_mastery
             return 0.0
         else:
             return self.calculate_tick_damage(player, mastery_override=triggers_mastery)
 
     def calculate_tick_damage(self, player, mastery_override=None):
-        dmg = player.attack_power * self.tick_damage_coeff
+        dmg = self.tick_coeff
 
-        # Mastery: Combo Strikes
         apply_mastery = False
-
         if mastery_override is not None:
             apply_mastery = mastery_override
         elif self.is_channeled:
-            # 引导技能从玩家身上的快照读取判定
             apply_mastery = player.channel_mastery_snapshot
 
         if apply_mastery:
             dmg *= (1.0 + player.mastery)
+
         dmg *= (1.0 + player.versatility)
         return dmg
 
-    def tick_cd(self, delta_time):
-        if self.current_cd > 0:
-            self.current_cd = max(0, self.current_cd - delta_time)
-
-
-# --- 具体技能 ---
-
-class SpellTP(Spell):
-    def __init__(self):
-        super().__init__(
-            abbr="TP", name="Tiger Palm", ap_coeff=0.88,
-            energy_cost=50, chi_gen=2, base_cd=0,
-            req_talent=False  # 基础技能
-        )
-
-
-class SpellBOK(Spell):
-    def __init__(self):
-        super().__init__(
-            abbr="BOK", name="Blackout Kick", ap_coeff=3.56,
-            chi_cost=1, base_cd=0,
-            req_talent=False
-        )
-
-
-class SpellRSK(Spell):
-    def __init__(self):
-        super().__init__(
-            abbr="RSK", name="Rising Sun Kick", ap_coeff=4.228,
-            chi_cost=2, base_cd=10.0, cd_haste=True,
-            req_talent=False
-        )
-
-
-class SpellSCK(Spell):
-    def __init__(self):
-        super().__init__(
-            abbr="SCK", name="Spinning Crane Kick", ap_coeff=0.88 * 4,
-            chi_cost=2, base_cd=0,
-            base_cast_time=1.5, cast_haste=True,
-            is_channeled=True, total_ticks=4,
-            req_talent=False
-        )
-        self.tick_damage_coeff = 0.88
-
-
-class SpellFOF(Spell):
-    def __init__(self):
-        super().__init__(
-            abbr="FOF", name="Fists of Fury", ap_coeff=2.07 * 5,
-            chi_cost=3, base_cd=24.0, cd_haste=True,
-            base_cast_time=4.0, cast_haste=True,
-            is_channeled=True, total_ticks=5,
-            req_talent=False  # 虽然是核心技能，但通常视为自带
-        )
-        self.tick_damage_coeff = 2.07
+    def tick_cd(self, dt):
+        if self.current_cd > 0: self.current_cd = max(0, self.current_cd - dt)
 
 
 class SpellWDP(Spell):
-    def __init__(self):
-        super().__init__(
-            abbr="WDP", name="Whirling Dragon Punch", ap_coeff=5.40,
-            base_cd=30.0, cd_haste=False,
-            req_talent=True  # !!! 天赋技能 !!!
-        )
-
-    def is_usable(self, player, other_spells=None):
-        # 父类检查 (含 req_talent 检查)
-        if not super().is_usable(player): return False
-
-        if other_spells:
-            rsk = other_spells.get("RSK")
-            fof = other_spells.get("FOF")
-            if rsk and fof:
-                if rsk.current_cd > 0 and fof.current_cd > 0:
-                    return True
-        return False
+    def is_usable(self, player, other_spells):
+        if not super().is_usable(player, other_spells): return False
+        rsk = other_spells['RSK']
+        fof = other_spells['FOF']
+        return rsk.current_cd > 0 and fof.current_cd > 0
 
 
-class SpellSOTWL(Spell):
-    def __init__(self):
-        super().__init__(
-            abbr="SOTWL", name="Strike of the Windlord", ap_coeff=15.12,
-            chi_cost=2, base_cd=30.0, cd_haste=False,
-            req_talent=True  # !!! 天赋技能 !!!
-        )
-
-
-class SpellSW(Spell):
-    def __init__(self):
-        super().__init__(
-            abbr="SW", name="Cut Wind", ap_coeff=8.96,
-            base_cd=30.0, cd_haste=False,
-            base_cast_time=0.4, cast_haste=False,
-            is_channeled=False,
-            damage_type="Nature",
-            gcd_override=0.4,
-            req_talent=True  # !!! 天赋技能 !!!
-        )
-
-
-# --- SpellBook 管理类 (核心改动) ---
 class SpellBook:
-    def __init__(self, selected_talents=None):
-        """
-        selected_talents: list of strings, e.g. ["WDP", "SW"]
-        如果为 None，则只激活基础技能。
-        """
-        if selected_talents is None:
-            selected_talents = []
-
+    def __init__(self, talents):
         self.spells = {
-            "TP": SpellTP(),
-            "BOK": SpellBOK(),
-            "RSK": SpellRSK(),
-            "SCK": SpellSCK(),
-            "FOF": SpellFOF(),
-            "WDP": SpellWDP(),
-            "SOTWL": SpellSOTWL(),
-            "SW": SpellSW(),
+            'TP': Spell('TP', 0.88, energy=50, chi_gen=2),
+            'BOK': Spell('BOK', 3.56, chi_cost=1),
+            'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
+            'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
+            # FOF Buffed to 300% * 5
+            'FOF': Spell('FOF', 3.00 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0,
+                         cast_haste=True),
+            'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True),
+            'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True),
+            'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4)
         }
-
-        # 初始化天赋状态
-        for abbr, spell in self.spells.items():
-            if spell.req_talent:
-                # 如果该技能需要天赋，检查它是否在传入的 selected_talents 列表中
-                if abbr in selected_talents:
-                    spell.is_known = True
-                else:
-                    spell.is_known = False  # 没点天赋，设为不可用
+        for s in self.spells.values():
+            if s.req_talent:
+                s.is_known = (s.abbr in talents)
             else:
-                # 基础技能始终可用
-                spell.is_known = True
+                s.is_known = True
 
-    def tick(self, delta_time):
-        for spell in self.spells.values():
-            # 只有学会的技能才需要转CD？
-            # 其实不管学没学会，转CD不影响逻辑，但为了性能可以加判断。
-            # 这里为了简单，全部转CD。
-            spell.tick_cd(delta_time)
+    def tick(self, dt):
+        for s in self.spells.values(): s.tick_cd(dt)
 
-    def get_spell(self, abbr):
-        return self.spells.get(abbr)
+
+# ==========================================
+# 3. Timeline & Env
+# ==========================================
+class Timeline:
+    def __init__(self, scenario_id):
+        self.scenario_id = scenario_id
+        self.duration = 20.0
+        self.is_random_dt = False
+
+    def reset(self):
+        self.is_random_dt = (np.random.rand() < 0.2) if self.scenario_id == 2 else False
+
+    def get_status(self, t):
+        uptime, mod, done = True, 1.0, False
+        if t >= self.duration: return uptime, mod, True
+        if self.scenario_id == 1 and 8.0 <= t < 12.0: uptime = False
+        if self.scenario_id == 2 and 8.0 <= t < 12.0 and self.is_random_dt: uptime = False
+        if self.scenario_id == 3 and t >= 16.0: mod = 3.0
+        return uptime, mod, done
+
+
+class MonkEnv(gym.Env):
+    def __init__(self):
+        self.observation_space = spaces.Box(low=0, high=1000, shape=(14,), dtype=np.float32)
+        self.action_space = spaces.Discrete(9)
+        self.action_map = {0: 'Wait', 1: 'TP', 2: 'BOK', 3: 'RSK', 4: 'SCK', 5: 'FOF', 6: 'WDP', 7: 'SOTWL', 8: 'SW'}
+        self.spell_keys = list(self.action_map.values())[1:]
+        self.scenario = 0
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.player = PlayerState()
+        self.book = SpellBook(talents=['WDP', 'SW'])
+        scen_id = options['timeline'] if options else np.random.randint(0, 4)
+        self.timeline = Timeline(scen_id)
+        self.timeline.reset()
+        self.time = 0.0
+        return self._get_obs(), {}
+
+    def _get_obs(self):
+        uptime, mod, _ = self.timeline.get_status(self.time)
+        obs = [
+            self.player.energy, self.player.chi, self.player.gcd_remaining,
+            self.book.spells['RSK'].current_cd,
+            self.book.spells['FOF'].current_cd,
+            self.book.spells['WDP'].current_cd,
+            self.book.spells['SOTWL'].current_cd,
+            self.book.spells['SW'].current_cd,
+            self.time,
+            1.0 if uptime else 0.0,
+            mod
+        ]
+        return np.array(obs + [0] * (14 - len(obs)), dtype=np.float32)
+
+    def action_masks(self):
+        uptime, _, _ = self.timeline.get_status(self.time)
+        if not uptime: return [True] + [False] * 8
+        if self.player.gcd_remaining > 0: return [True] + [False] * 8
+        if self.player.is_channeling: return [True] + [False] * 8
+        masks = [True] * 9
+        for i, key in enumerate(self.spell_keys):
+            masks[i + 1] = self.book.spells[key].is_usable(self.player, self.book.spells)
+        return masks
+
+    def step(self, action_idx):
+        step_dt = 0.1
+        total_damage = 0
+        uptime, mod, _ = self.timeline.get_status(self.time)
+
+        if action_idx > 0:
+            key = self.action_map[action_idx]
+            dmg = self.book.spells[key].cast(self.player)
+            total_damage += dmg
+
+        tick_dmg = self.player.tick(step_dt)
+        total_damage += tick_dmg
+        self.book.tick(step_dt)
+        total_damage *= mod
+        self.time += step_dt
+        _, _, done = self.timeline.get_status(self.time)
+
+        reward = total_damage
+
+        # Reward Shaping
+        if action_idx == 1 and self.player.chi <= 3: reward += 2.0
+        if action_idx == 1 and self.player.chi >= 5: reward -= 2.0
+        if action_idx == 5: reward += 5.0
+
+        return self._get_obs(), reward, done, False, {'damage': total_damage}
+
+
+def mask_fn(env): return env.action_masks()
+
+
+def run():
+    print(">>> 初始化训练环境 (Fixed Chi & Mastery)...")
+    env = MonkEnv()
+    env = ActionMasker(env, mask_fn)
+    model = MaskablePPO("MlpPolicy", env, verbose=1, gamma=0.99, learning_rate=3e-4)
+    print(">>> 开始训练 (Steps: 80k)...")
+    model.learn(total_timesteps=80000)
+
+    scenarios = [(0, "Patchwerk"), (3, "Execute (End +200%)")]
+
+    for scen_id, name in scenarios:
+        print(f"\n{'=' * 30}\nTesting Scenario: {name}\n{'=' * 30}")
+        obs, _ = env.reset(options={'timeline': scen_id})
+        print(f"{'Time':<6} | {'Action':<8} | {'Chi':<3} | {'Eng':<4} | {'AP%':<6}")
+
+        done = False
+        while not done:
+            masks = env.action_masks()
+            action, _ = model.predict(obs, action_masks=masks, deterministic=True)
+            action_item = action.item()
+
+            t_now = env.unwrapped.time
+            chi = env.unwrapped.player.chi
+            en = env.unwrapped.player.energy
+
+            obs, reward, done, _, info = env.step(action_item)
+            dmg = info['damage']
+            act_name = env.unwrapped.action_map[action_item]
+
+            if action_item != 0:
+                print(f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
+            elif dmg > 0:
+                print(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
+
+
+if __name__ == '__main__':
+    run()
