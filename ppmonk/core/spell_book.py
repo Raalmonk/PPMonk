@@ -22,6 +22,10 @@ class Spell:
         self.current_cd = 0.0
         self.is_combo_strike = True
 
+        # Crit modeling
+        self.crit_multiplier = 2.0
+        self.bonus_crit_chance = 0.0
+
     def update_tick_coeff(self):
         self.tick_coeff = self.ap_coeff / self.total_ticks if self.total_ticks > 0 else self.ap_coeff
 
@@ -89,6 +93,11 @@ class Spell:
         if apply_mastery:
             dmg *= (1.0 + player.mastery)
         dmg *= (1.0 + player.versatility)
+
+        # Expected value from critical strikes
+        effective_crit_chance = max(0.0, min(1.0, player.crit + self.bonus_crit_chance))
+        crit_ev_mult = 1.0 + effective_crit_chance * (self.crit_multiplier - 1.0)
+        dmg *= crit_ev_mult
         return dmg
 
     def tick_cd(self, dt):
