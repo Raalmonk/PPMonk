@@ -4,6 +4,7 @@ from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
+from ppmonk.core.visualizer import TimelineDataCollector
 from ppmonk.envs.monk_env import MonkEnv
 
 # [UI 依赖] 场景映射
@@ -104,6 +105,7 @@ def run_simulation(
 
     total_ap = 0.0
     done = False
+    collector = TimelineDataCollector()
 
     while not done:
         masks = eval_env.action_masks()
@@ -120,8 +122,11 @@ def run_simulation(
 
         act_name = eval_env.unwrapped.action_map[action_item]
 
+        duration = max(eval_env.unwrapped.time - t_now, 0.0)
+
         if action_item != 0:
             log(f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
+            collector.log_cast(t_now, act_name, duration=duration, damage=dmg)
         elif dmg > 0:
             log(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
 
@@ -143,7 +148,11 @@ def run_simulation(
     if status_callback: status_callback("Complete", 1.0)
 
     # [修复 2] 返回结果给 UI 显示
-    return {"total_ap": total_ap, "scenario": scenario_name}
+    return {
+        "total_ap": total_ap,
+        "scenario": scenario_name,
+        "timeline_data": collector.get_data(),
+    }
 
 
 if __name__ == '__main__':

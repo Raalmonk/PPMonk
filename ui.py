@@ -1,8 +1,10 @@
-import threading
 import queue
+import threading
+
 import customtkinter as ctk
 
-from main import run_simulation, SCENARIO_MAP
+from main import SCENARIO_MAP, run_simulation
+from ppmonk.ui.timeline_view import NativeTimelineWindow
 from ppmonk.ui.talent_ui import TalentTreeWindow
 
 
@@ -47,6 +49,7 @@ class PPMonkApp(ctk.CTk):
         self.status_var = ctk.StringVar(value="Ready")
         self.total_ap_var = ctk.StringVar(value="--")
         self.scenario_var = ctk.StringVar(value="Patchwerk")
+        self.last_timeline_data = None
 
         self._build_layout()
         self.after(100, self._process_log_queue)
@@ -143,6 +146,14 @@ class PPMonkApp(ctk.CTk):
         start_btn.grid(row=11, column=0, padx=20, pady=20, sticky="ew")
         self.start_button = start_btn
 
+        self.timeline_btn = ctk.CTkButton(
+            sidebar,
+            text="View Timeline",
+            state="disabled",
+            command=self._open_timeline,
+        )
+        self.timeline_btn.grid(row=12, column=0, padx=20, pady=(0, 20), sticky="ew")
+
         main = ctk.CTkFrame(self)
         main.grid(row=0, column=1, sticky="nsew")
         main.grid_columnconfigure(0, weight=1)
@@ -177,6 +188,15 @@ class PPMonkApp(ctk.CTk):
 
     def _open_talent_window(self):
         TalentTreeWindow(self, self._on_talents_updated)
+
+    def _open_timeline(self):
+        if self.last_timeline_data:
+            timeline_window = NativeTimelineWindow(
+                self,
+                self.last_timeline_data,
+                assets_path="PPMonk/assets/abilityIcons",
+            )
+            timeline_window.focus()
 
     def _on_talents_updated(self, talent_list):
         self.active_talents_list = talent_list
@@ -222,6 +242,8 @@ class PPMonkApp(ctk.CTk):
         self.progress.configure(mode="indeterminate")
         self.progress.start()
         self.start_button.configure(state="disabled")
+        self.timeline_btn.configure(state="disabled")
+        self.last_timeline_data = None
 
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
@@ -284,6 +306,10 @@ class PPMonkApp(ctk.CTk):
             elif item_type == "result":
                 if payload:
                     self.total_ap_var.set(f"{payload.get('total_ap', 0):,.2f}")
+                    if payload.get("timeline_data"):
+                        self.last_timeline_data = payload["timeline_data"]
+                        self.timeline_btn.configure(state="normal")
+                        self._append_log("Timeline data ready.")
         self.after(100, self._process_log_queue)
 
 
