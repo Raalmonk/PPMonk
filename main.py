@@ -170,6 +170,7 @@ def run_simulation(
         "timeline_data": collector.get_data(),
     }
 
-
+# main.py
+# ...
 if __name__ == '__main__':
     run_simulation()

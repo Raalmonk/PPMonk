@@ -18,9 +18,9 @@ class StatModTalent(Talent):
         self.is_percentage = is_percentage
     def apply(self, player, spell_book):
         if hasattr(player, self.stat_name):
-            base_val = getattr(player, self.stat_name)
-            if self.is_percentage: setattr(player, self.stat_name, base_val * (1.0 + self.value))
-            else: setattr(player, self.stat_name, base_val + self.value)
+            base = getattr(player, self.stat_name)
+            if self.is_percentage: setattr(player, self.stat_name, base * (1.0 + self.value))
+            else: setattr(player, self.stat_name, base + self.value)
 
 class SpellModTalent(Talent):
     def __init__(self, name, spell_abbr, attr_name, value, is_percentage=False):
@@ -33,12 +33,12 @@ class SpellModTalent(Talent):
         if self.spell_abbr in spell_book.spells:
             spell = spell_book.spells[self.spell_abbr]
             if hasattr(spell, self.attr_name):
-                base_val = getattr(spell, self.attr_name)
-                if self.is_percentage: setattr(spell, self.attr_name, base_val * (1.0 + self.value))
-                else: setattr(spell, self.attr_name, base_val + self.value)
+                base = getattr(spell, self.attr_name)
+                if self.is_percentage: setattr(spell, self.attr_name, base * (1.0 + self.value))
+                else: setattr(spell, self.attr_name, base + self.value)
                 if self.attr_name == 'ap_coeff': spell.update_tick_coeff()
 
-# [新增] 特殊天赋类
+# --- 新增：机制类天赋 ---
 class MomentumBoostTalent(Talent):
     def apply(self, player, spell_book):
         if 'FOF' in spell_book.spells:
@@ -51,86 +51,58 @@ class CombatWisdomTalent(Talent):
         player.combat_wisdom_ready = True
         player.combat_wisdom_timer = 0.0
 
-
-class SharpReflexesTalent(Talent):
-    def apply(self, player, spell_book):
-        if not hasattr(player, 'talents_procs'):
-            player.talents_procs = {}
-        pass
-
-
 class PlaceholderTalent(Talent):
-    def apply(self, player, spell_book):
-        # Placeholder for yet-to-be-implemented talent effects
-        pass
+    def apply(self, player, spell_book): pass
 
-# --- 天赋数据库 ---
+# --- 修复后的天赋数据库 ---
 TALENT_DB = {
-    # --- 第一层 ---
-    # 关键：1-1 必须解锁 FOF，否则你永远放不出来
+    # [重要] 只有加了这行，UI传 '1-1' 时才能解锁怒雷破
     '1-1': UnlockSpellTalent('Fists of Fury', 'FOF'),
 
-    # --- 第二层 ---
+    # [重要] 恢复前三层机制
     '2-1': MomentumBoostTalent('Momentum Boost'),
     '2-2': CombatWisdomTalent('Combat Wisdom'),
-    '2-3': SharpReflexesTalent('Sharp Reflexes'),
+    '2-3': PlaceholderTalent('Sharp Reflexes'), # 你可以在这里换成真实的 Proc 逻辑
 
-    # Row 3
+    # 占位符保持不变，防止 UI 报错
     '3-1': PlaceholderTalent('Touch of the Tiger'),
-    '3-2': PlaceholderTalent('Ferociousness'),  # Rank 2 logic handled internally?
+    '3-2': PlaceholderTalent('Ferociousness'),
     '3-3': PlaceholderTalent('Hardened Soles'),
     '3-4': StatModTalent('Ascension', 'max_energy', 20.0),
-
-    # Row 4
     '4-1': PlaceholderTalent('Dual Threat'),
-    '4-2': PlaceholderTalent('Teachings of the Monastery'),  # TOTM usually buffs blackout kick
+    '4-2': PlaceholderTalent('Teachings of the Monastery'),
     '4-3': PlaceholderTalent('Glory of the Dawn'),
-
-    # Row 5
     '5-1': PlaceholderTalent('Crane Vortex'),
     '5-2': PlaceholderTalent('Meridian Strikes'),
-    '5-3': PlaceholderTalent('Rising Star'),  # Usually buffs RSK
+    '5-3': PlaceholderTalent('Rising Star'),
     '5-4': PlaceholderTalent('Zenith'),
-    '5-5': PlaceholderTalent('Hit Combo'),  # Needs buff tracking logic
+    '5-5': PlaceholderTalent('Hit Combo'),
     '5-6': PlaceholderTalent('Brawler Intensity'),
-
-    # Row 6
     '6-1': PlaceholderTalent('Jade Ignition'),
-    '6-2': PlaceholderTalent('Cyclone/Crashing Choice'),
-    '6-3': PlaceholderTalent('Horn/Focus Choice'),
+    '6-2': PlaceholderTalent('Choice Node'),
+    '6-3': PlaceholderTalent('Choice Node'),
     '6-4': PlaceholderTalent('Obsidian Spiral'),
     '6-5': PlaceholderTalent('Combo Breaker'),
-
-    # Row 7
     '7-1': PlaceholderTalent('Dance of Chi-Ji'),
     '7-2': PlaceholderTalent('Shadowboxing Treads'),
-    # 7-3 是核心二选一: WDP 或 SOTWL. 
-    # UI 上这是一个节点，逻辑上我们暂且让它解锁 WDP (或者你需要更复杂的 Choice 逻辑)
-    # 临时方案：解锁 WDP 和 SOTWL 两个，或者默认给 WDP。
     '7-3': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
     '7-4': PlaceholderTalent('Energy Burst'),
     '7-5': PlaceholderTalent('Inner Peace'),
-
-    # Row 8
-    '8-1': PlaceholderTalent('Tiger Eye Brew Base'),
+    '8-1': PlaceholderTalent('Tiger Eye Brew'),
     '8-2': PlaceholderTalent('Sequenced Strikes'),
     '8-3': PlaceholderTalent('Sunfire Spiral'),
     '8-4': PlaceholderTalent('Communion with Wind'),
-    '8-5': PlaceholderTalent('Revolving/Echo Choice'),
+    '8-5': PlaceholderTalent('Choice Node'),
     '8-6': PlaceholderTalent('Universal Energy'),
     '8-7': PlaceholderTalent('Memory of Monastery'),
-
-    # Row 9
-    '9-1': PlaceholderTalent('Tiger Eye Buff'),
-    '9-2': PlaceholderTalent('Rushing Jade Wind'),
+    '9-1': PlaceholderTalent('TEB Buff'),
+    '9-2': PlaceholderTalent('RJW'),
     '9-3': PlaceholderTalent('Xuens Battlegear'),
     '9-4': PlaceholderTalent('Thunderfist'),
     '9-5': PlaceholderTalent('Weapon of Wind'),
-    '9-6': PlaceholderTalent('Knowl. Broken Temple'),
+    '9-6': PlaceholderTalent('Knowledge'),
     '9-7': UnlockSpellTalent('Slicing Winds', 'SW'),
     '9-8': PlaceholderTalent('Jadefire Stomp'),
-
-    # Row 10
     '10-1': PlaceholderTalent('TEB Final'),
     '10-2': PlaceholderTalent('Skyfire Heel'),
     '10-3': PlaceholderTalent('Harmonic Combo'),
@@ -139,7 +111,7 @@ TALENT_DB = {
     '10-6': PlaceholderTalent('Airborne Rhythm'),
     '10-7': PlaceholderTalent('Path of Jade'),
 
-    # --- 原有保留 (如果 UI 还在传这些旧 ID) ---
+    # 兼容旧名称
     'WDP': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
     'SW': UnlockSpellTalent('Slicing Winds', 'SW'),
     'SOTWL': UnlockSpellTalent('Strike of the Windlord', 'SOTWL'),
@@ -147,7 +119,7 @@ TALENT_DB = {
 }
 
 class TalentManager:
-    def apply_talents(self, talent_names, player, spell_book):
-        for name in talent_names:
-            if name in TALENT_DB:
-                TALENT_DB[name].apply(player, spell_book)
+    def apply_talents(self, talent_ids, player, spell_book):
+        for tid in talent_ids:
+            if tid in TALENT_DB:
+                TALENT_DB[tid].apply(player, spell_book)
