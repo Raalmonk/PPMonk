@@ -124,7 +124,8 @@ class PPMonkApp(ctk.CTk):
         self.talent_summary_label = ctk.CTkLabel(sidebar, text="Selected: Default")
         self.talent_summary_label.grid(row=7, column=0, padx=20, pady=0)
 
-        self.active_talents_list = ["WDP", "SW", "Ascension"]
+        # Default talents must unlock Fists of Fury and its supporting procs
+        self.active_talents_list = ["1-1", "2-1", "2-2", "WDP", "SW", "Ascension"]
         self.talent_summary_label.configure(text=f"Selected: {len(self.active_talents_list)} nodes")
 
         scenario_label = ctk.CTkLabel(sidebar, text="Scenario", font=ctk.CTkFont(weight="bold"))
