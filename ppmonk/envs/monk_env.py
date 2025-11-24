@@ -26,7 +26,8 @@ class MonkEnv(gym.Env):
         
         # [核心修复] 使用传入的参数初始化 Player 和 SpellBook
         self.player = PlayerState(**self.player_kwargs)
-        self.book = SpellBook(talents=self.current_talents) 
+        self.book = SpellBook(talents=self.current_talents)
+        self.book.apply_talents(self.player)
         
         # 应用天赋被动 (如力贯千钧)
         # 注意：这里假设你已经有了 TalentManager 的逻辑，或者像之前那样手动处理
