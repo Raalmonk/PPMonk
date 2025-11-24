@@ -3,6 +3,7 @@ import queue
 import customtkinter as ctk
 
 from main import run_simulation, SCENARIO_MAP
+from ppmonk.ui.talent_ui import TalentTreeWindow
 
 
 ctk.set_appearance_mode("Dark")
@@ -57,8 +58,8 @@ class PPMonkApp(ctk.CTk):
 
         sidebar = ctk.CTkFrame(self, width=320, corner_radius=0)
         sidebar.grid(row=0, column=0, sticky="nsew")
-        sidebar.grid_rowconfigure((1, 2, 3, 4, 5, 6), weight=0)
-        sidebar.grid_rowconfigure(7, weight=1)
+        sidebar.grid_rowconfigure((1, 2, 3, 4, 5, 6, 7), weight=0)
+        sidebar.grid_rowconfigure(8, weight=1)
 
         title = ctk.CTkLabel(
             sidebar,
@@ -108,15 +109,19 @@ class PPMonkApp(ctk.CTk):
         talents_label = ctk.CTkLabel(sidebar, text="Talents", font=ctk.CTkFont(weight="bold"))
         talents_label.grid(row=5, column=0, padx=20, pady=(16, 4), sticky="w")
 
-        self.talent_vars = {
-            "WDP": ctk.BooleanVar(value=True),
-            "SW": ctk.BooleanVar(value=True),
-            "Ascension": ctk.BooleanVar(value=True),
-        }
+        talent_btn = ctk.CTkButton(
+            sidebar,
+            text="Open Talent Calculator",
+            fg_color="#5B2C6F",
+            command=self._open_talent_window,
+        )
+        talent_btn.grid(row=6, column=0, padx=20, pady=10, sticky="ew")
 
-        for i, (talent, var) in enumerate(self.talent_vars.items(), start=6):
-            chk = ctk.CTkCheckBox(sidebar, text=talent, variable=var)
-            chk.grid(row=i, column=0, padx=20, pady=4, sticky="w")
+        self.talent_summary_label = ctk.CTkLabel(sidebar, text="Selected: Default")
+        self.talent_summary_label.grid(row=7, column=0, padx=20, pady=0)
+
+        self.active_talents_list = ["WDP", "SW", "Ascension"]
+        self.talent_summary_label.configure(text=f"Selected: {len(self.active_talents_list)} nodes")
 
         scenario_label = ctk.CTkLabel(sidebar, text="Scenario", font=ctk.CTkFont(weight="bold"))
         scenario_label.grid(row=9, column=0, padx=20, pady=(16, 4), sticky="w")
@@ -170,6 +175,14 @@ class PPMonkApp(ctk.CTk):
         self.ap_value_label = ctk.CTkLabel(ap_frame, textvariable=self.total_ap_var, font=ctk.CTkFont(size=26, weight="bold"))
         self.ap_value_label.grid(row=0, column=1, padx=10, pady=12, sticky="e")
 
+    def _open_talent_window(self):
+        TalentTreeWindow(self, self._on_talents_updated)
+
+    def _on_talents_updated(self, talent_list):
+        self.active_talents_list = talent_list
+        self.talent_summary_label.configure(text=f"Selected: {len(talent_list)} nodes")
+        print(f"UI Updated Talents: {self.active_talents_list}")
+
     def _update_stat_entry(self, name):
         entry = getattr(self, f"{name.lower()}_entry")
         var = self.stat_vars[name]
@@ -215,7 +228,7 @@ class PPMonkApp(ctk.CTk):
         self.log_box.configure(state="disabled")
 
         stats = {name: var.get() for name, var in self.stat_vars.items()}
-        talents = [talent for talent, var in self.talent_vars.items() if var.get()]
+        talents = self.active_talents_list
         scenario = self.scenario_var.get()
 
         ratings = {
