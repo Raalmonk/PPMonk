@@ -4,17 +4,21 @@ class PlayerState:
         self.rating_haste = rating_haste
         self.rating_mastery = rating_mastery
         self.rating_vers = rating_vers
+        
+        # ... (基础属性) ...
         self.base_mastery = 0.19
         self.base_crit = 0.10
-
-        # 基础属性，方便天赋修改
         self.max_energy = 120.0
-        self.energy_regen_mult = 1.0  # 能量回复倍率
-
+        self.energy_regen_mult = 1.0
         self.energy = 120.0
         self.max_chi = 6
-        self.chi = 2
+        self.chi = 2 # Combat Wisdom 让脱战 Chi 为 2，默认设为 2 即可
 
+        # [新增] Combat Wisdom 计时器
+        self.combat_wisdom_ready = False 
+        self.combat_wisdom_timer = 0.0
+
+        # ... (其余属性) ...
         self.last_spell_name = None
         self.gcd_remaining = 0.0
         self.is_channeling = False
@@ -24,17 +28,9 @@ class PlayerState:
         self.time_until_next_tick = 0.0
         self.channel_tick_interval = 0.0
         self.channel_mastery_snapshot = False
-
-        self.crit = 0.0
-        self.versatility = 0.0
-        self.haste = 0.0
-        self.mastery = 0.0
+        
+        self.crit = 0.0; self.versatility = 0.0; self.haste = 0.0; self.mastery = 0.0
         self.update_stats()
-
-        # Combat Wisdom tracking
-        self.has_combat_wisdom = False
-        self.combat_wisdom_timer = 0.0
-        self.combat_wisdom_ready = True
 
     def update_stats(self):
         self.crit = (self.rating_crit / 4600.0) + self.base_crit
@@ -51,7 +47,6 @@ class PlayerState:
         total_damage = 0
         dt = 0.01
         elapsed = 0.0
-        # [修改] 引入 energy_regen_mult
         regen_rate = 10.0 * (1.0 + self.haste) * self.energy_regen_mult
 
         while elapsed < duration:
@@ -61,7 +56,8 @@ class PlayerState:
             if self.gcd_remaining > 0:
                 self.gcd_remaining = max(0, self.gcd_remaining - step)
 
-            if self.has_combat_wisdom and not self.combat_wisdom_ready:
+            # [新增] Combat Wisdom CD 冷却
+            if not self.combat_wisdom_ready:
                 self.combat_wisdom_timer -= step
                 if self.combat_wisdom_timer <= 0:
                     self.combat_wisdom_ready = True
@@ -73,6 +69,7 @@ class PlayerState:
                 if self.time_until_next_tick <= 1e-6:
                     if self.channel_ticks_remaining > 0:
                         spell = self.current_channel_spell
+                        # 传递 tick 索引
                         tick_idx = spell.total_ticks - self.channel_ticks_remaining
                         tick_dmg = spell.calculate_tick_damage(self, tick_idx=tick_idx)
                         total_damage += tick_dmg
