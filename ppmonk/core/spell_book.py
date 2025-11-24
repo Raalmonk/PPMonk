@@ -26,6 +26,13 @@ class Spell:
         self.crit_multiplier = 2.0
         self.bonus_crit_chance = 0.0
 
+        # Momentum Boost mechanics
+        self.haste_dmg_scaling = False
+        self.tick_dmg_ramp = 0.0
+
+        # Combat Wisdom
+        self.triggers_combat_wisdom = False
+
     def update_tick_coeff(self):
         self.tick_coeff = self.ap_coeff / self.total_ticks if self.total_ticks > 0 else self.ap_coeff
 
@@ -66,6 +73,18 @@ class Spell:
         else:
             player.gcd_remaining = 1.0
 
+        extra_damage = 0.0
+
+        if self.triggers_combat_wisdom and player.has_combat_wisdom and player.combat_wisdom_ready:
+            player.combat_wisdom_ready = False
+            player.combat_wisdom_timer = 15.0
+
+            eh_coeff = 1.2
+            eh_dmg = eh_coeff * (1.0 + player.versatility)
+            crit_ev = max(0.0, min(1.0, player.crit))
+            eh_dmg *= (1.0 + crit_ev * (self.crit_multiplier - 1.0))
+            extra_damage += eh_dmg
+
         triggers_mastery = self.is_combo_strike and (player.last_spell_name is not None) and (player.last_spell_name != self.abbr)
         player.last_spell_name = self.abbr
 
@@ -80,10 +99,23 @@ class Spell:
             player.channel_mastery_snapshot = triggers_mastery
             return 0.0
         else:
-            return self.calculate_tick_damage(player, mastery_override=triggers_mastery)
+            base_dmg = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
 
-    def calculate_tick_damage(self, player, mastery_override=None):
+            if self.triggers_combat_wisdom and player.has_combat_wisdom and (not player.combat_wisdom_ready and player.combat_wisdom_timer >= 14.9):
+                base_dmg *= 1.30
+
+            return base_dmg + extra_damage
+
+    def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
         dmg = self.tick_coeff
+
+        if self.haste_dmg_scaling:
+            dmg *= (1.0 + player.haste)
+
+        if self.tick_dmg_ramp > 0 and self.total_ticks > 0:
+            ramp_mult = 1.0 + (tick_idx + 1) * self.tick_dmg_ramp
+            dmg *= ramp_mult
+
         apply_mastery = False
         if mastery_override is not None:
             apply_mastery = mastery_override
@@ -129,7 +161,7 @@ class SpellBook:
             'BOK': Spell('BOK', 3.56, chi_cost=1),
             'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
             'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
-            'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0, cast_haste=True),
+            'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0, cast_haste=True, req_talent=True),
             # Talent Spells (req_talent=True)
             'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True),
             'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True),
@@ -137,6 +169,8 @@ class SpellBook:
         }
         self.active_talents = active_talents if active_talents else []
         self.talent_manager = TalentManager()
+
+        self.spells['TP'].triggers_combat_wisdom = True
 
     def apply_talents(self, player):
         self.talent_manager.apply_talents(self.active_talents, player, self)
