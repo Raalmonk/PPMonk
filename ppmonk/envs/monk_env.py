@@ -84,6 +84,8 @@ class MonkEnv(gym.Env):
     def action_masks(self):
         if self.time >= 20.0: return [False]*9
         masks = [True] * 9
+        fof_mask_idx = None
+        fof_spell = self.book.spells.get('FOF') if hasattr(self, 'book') else None
         for i, key in enumerate(self.spell_keys):
             spell = self.book.spells[key]
             is_usable = False
@@ -94,6 +96,25 @@ class MonkEnv(gym.Env):
             if spell.abbr == self.player.last_spell_name:
                 is_usable = False
             masks[i+1] = is_usable
+            if key == 'FOF':
+                fof_mask_idx = i + 1
+
+        # Debugging path specifically for Fists of Fury availability
+        if fof_spell is not None and fof_mask_idx is not None:
+            fof_available = masks[fof_mask_idx]
+            if fof_available:
+                print("DEBUG: FOF 可用！")
+            else:
+                if not fof_spell.is_known:
+                    print("DEBUG: FOF 未学会")
+                elif fof_spell.current_cd > 0:
+                    print(f"DEBUG: FOF 冷却中: {fof_spell.current_cd}")
+                elif self.player.chi < fof_spell.chi_cost:
+                    print(f"DEBUG: FOF 真气不足: {self.player.chi}/{fof_spell.chi_cost}")
+                elif getattr(self.player, 'is_channeling', False) and getattr(self.player, 'current_channel_spell', None) not in (None, fof_spell):
+                    print("DEBUG: FOF 正在引导其他技能")
+                else:
+                    print("DEBUG: FOF 其他原因不可用")
         return masks
 
     def step(self, action_idx):
