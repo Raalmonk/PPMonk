@@ -106,7 +106,15 @@ class SpellWDP(Spell):
 
 
 class SpellBook:
-    def __init__(self, active_talents=None):
+    def __init__(self, active_talents=None, talents=None):
+        # Support both the new `active_talents` parameter and the legacy `talents`
+        # keyword used by some callers.
+        if active_talents is not None and talents is not None:
+            merged = list(dict.fromkeys([*active_talents, *talents]))
+            active_talents = merged
+        elif active_talents is None and talents is not None:
+            active_talents = talents
+
         self.spells = {
             'TP': Spell('TP', 0.88, energy=50, chi_gen=2),
             'BOK': Spell('BOK', 3.56, chi_cost=1),
