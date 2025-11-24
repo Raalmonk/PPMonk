@@ -86,6 +86,8 @@ class MonkEnv(gym.Env):
         masks = [True] * 9
         fof_mask_idx = None
         fof_spell = self.book.spells.get('FOF') if hasattr(self, 'book') else None
+        if hasattr(self.book, 'active_talents'):
+            print(f"DEBUG: 当前 active_talents = {self.book.active_talents}")
         for i, key in enumerate(self.spell_keys):
             spell = self.book.spells[key]
             is_usable = False
@@ -105,16 +107,20 @@ class MonkEnv(gym.Env):
             if fof_available:
                 print("DEBUG: FOF 可用！")
             else:
+                reasons = []
                 if not fof_spell.is_known:
-                    print("DEBUG: FOF 未学会")
-                elif fof_spell.current_cd > 0:
-                    print(f"DEBUG: FOF 冷却中: {fof_spell.current_cd}")
-                elif self.player.chi < fof_spell.chi_cost:
-                    print(f"DEBUG: FOF 真气不足: {self.player.chi}/{fof_spell.chi_cost}")
-                elif getattr(self.player, 'is_channeling', False) and getattr(self.player, 'current_channel_spell', None) not in (None, fof_spell):
-                    print("DEBUG: FOF 正在引导其他技能")
-                else:
-                    print("DEBUG: FOF 其他原因不可用")
+                    reasons.append("未学会")
+                if fof_spell.current_cd > 0:
+                    reasons.append(f"冷却中: {fof_spell.current_cd:.2f}s")
+                if self.player.chi < fof_spell.chi_cost:
+                    reasons.append(f"真气不足 {self.player.chi}/{fof_spell.chi_cost}")
+                if getattr(self.player, 'is_channeling', False) and getattr(self.player, 'current_channel_spell', None) not in (None, fof_spell):
+                    reasons.append("正在引导其他技能")
+                if self.player.energy < fof_spell.energy_cost:
+                    reasons.append(f"能量不足 {self.player.energy}/{fof_spell.energy_cost}")
+                if not reasons:
+                    reasons.append("其他原因不可用")
+                print("DEBUG: FOF 不可用 -> " + "; ".join(reasons))
         return masks
 
     def step(self, action_idx):
