@@ -207,7 +207,7 @@ class PPMonkApp(ctk.CTk):
         self.total_ap_var.set("--")
         self.status_var.set("Training...")
         self.progress.configure(mode="indeterminate")
-        self.progress.start(10)
+        self.progress.start()
         self.start_button.configure(state="disabled")
 
         self.log_box.configure(state="normal")
