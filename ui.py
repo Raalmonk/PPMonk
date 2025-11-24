@@ -45,6 +45,7 @@ class PPMonkApp(ctk.CTk):
 
         self.log_queue = queue.Queue()
         self.running = False
+        self.stop_event = threading.Event()
 
         self.status_var = ctk.StringVar(value="Ready")
         self.total_ap_var = ctk.StringVar(value="--")
@@ -144,7 +145,17 @@ class PPMonkApp(ctk.CTk):
             command=self._start_simulation,
         )
         start_btn.grid(row=11, column=0, padx=20, pady=20, sticky="ew")
-        self.start_button = start_btn
+        self.start_btn = start_btn
+
+        self.stop_btn = ctk.CTkButton(
+            sidebar,
+            text="Stop Training",
+            fg_color="#c0392b",
+            hover_color="#922b21",
+            state="disabled",
+            command=self._stop_simulation,
+        )
+        self.stop_btn.grid(row=12, column=0, padx=20, pady=(0, 20), sticky="ew")
 
         self.timeline_btn = ctk.CTkButton(
             sidebar,
@@ -152,7 +163,7 @@ class PPMonkApp(ctk.CTk):
             state="disabled",
             command=self._open_timeline,
         )
-        self.timeline_btn.grid(row=12, column=0, padx=20, pady=(0, 20), sticky="ew")
+        self.timeline_btn.grid(row=13, column=0, padx=20, pady=(0, 20), sticky="ew")
 
         main = ctk.CTkFrame(self)
         main.grid(row=0, column=1, sticky="nsew")
@@ -239,11 +250,13 @@ class PPMonkApp(ctk.CTk):
         self.running = True
         self.total_ap_var.set("--")
         self.status_var.set("Training...")
-        self.progress.configure(mode="indeterminate")
-        self.progress.start()
-        self.start_button.configure(state="disabled")
+        self.progress.configure(mode="determinate")
+        self.progress.set(0)
+        self.start_btn.configure(state="disabled")
+        self.stop_btn.configure(state="normal")
         self.timeline_btn.configure(state="disabled")
         self.last_timeline_data = None
+        self.stop_event.clear()
 
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
@@ -267,6 +280,12 @@ class PPMonkApp(ctk.CTk):
         )
         thread.start()
 
+    def _stop_simulation(self):
+        if self.running:
+            self.status_var.set("Stopping...")
+            self.stop_btn.configure(state="disabled")
+            self.stop_event.set()
+
     def _run_worker(self, ratings, talents, scenario):
         try:
             result = run_simulation(
@@ -274,11 +293,12 @@ class PPMonkApp(ctk.CTk):
                 scenario_name=scenario,
                 log_callback=self._enqueue_log,
                 status_callback=self._enqueue_status,
+                stop_event=self.stop_event,
                 **ratings,
             )
             self.log_queue.put(("result", result))
         finally:
-            self.log_queue.put(("status", {"text": "Complete", "progress": 1.0, "stop": True}))
+            self.log_queue.put(("status", {"text": "Ready", "stop": True}))
 
     def _enqueue_log(self, message):
         self.log_queue.put(("log", message))
@@ -295,13 +315,13 @@ class PPMonkApp(ctk.CTk):
                 self.status_var.set(payload.get("text", ""))
                 if payload.get("progress") is not None:
                     self.progress.configure(mode="determinate")
-                    self.progress.stop()
                     self.progress.set(payload["progress"])
                 if payload.get("stop"):
-                    self.progress.stop()
-                    self.progress.configure(mode="determinate")
-                    self.progress.set(1.0)
-                    self.start_button.configure(state="normal")
+                    if payload.get("progress") is not None:
+                        self.progress.set(payload.get("progress", 0))
+                    self.start_btn.configure(state="normal")
+                    self.stop_btn.configure(state="disabled")
+                    self.timeline_btn.configure(state="normal" if self.last_timeline_data else "disabled")
                     self.running = False
             elif item_type == "result":
                 if payload:

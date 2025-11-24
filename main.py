@@ -1,9 +1,9 @@
 import torch
-import numpy as np
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
+from ppmonk.core.callbacks import TrainingControlCallback
 from ppmonk.core.visualizer import TimelineDataCollector
 from ppmonk.envs.monk_env import MonkEnv
 
@@ -38,7 +38,8 @@ def run_simulation(
         talents=None,
         scenario_name="Patchwerk",
         log_callback=print,
-        status_callback=None  # [修复 1] 接收 UI 传来的状态回调，防止报错
+        status_callback=None,  # [修复 1] 接收 UI 传来的状态回调，防止报错
+        stop_event=None,
 ):
     if talents is None: talents = ['WDP', 'SW', 'Ascension']
 
@@ -59,7 +60,7 @@ def run_simulation(
     log(f"  属性: {player_kwargs}")
 
     # 1. 初始化环境
-    num_cpu = 16
+    num_cpu = 8
     env = SubprocVecEnv([make_env(i, talents, player_kwargs) for i in range(num_cpu)])
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -71,7 +72,7 @@ def run_simulation(
     model = MaskablePPO(
         "MlpPolicy",
         env,
-        verbose=1,
+        verbose=0,
         device=device,
         gamma=1.0,
         learning_rate=3e-4,
@@ -80,13 +81,28 @@ def run_simulation(
         batch_size=1024,
     )
 
-    log(">>> 开始训练 (Steps: 500,000)...")
-    model.learn(total_timesteps=500000)
+    total_steps = 50000
+    log(f">>> 开始训练 ({total_steps} steps)...")
+
+    callback = TrainingControlCallback(
+        total_timesteps=total_steps,
+        status_callback=status_callback,
+        stop_event=stop_event,
+    )
+
+    model.learn(total_timesteps=total_steps, callback=callback)
+
+    if stop_event and stop_event.is_set():
+        log(">>> 训练已终止 (用户操作)")
+        if status_callback:
+            status_callback("Training Stopped", 0)
+        return {"total_ap": 0, "scenario": scenario_name, "status": "stopped"}
 
     if status_callback: status_callback("Evaluating Strategy...", 0.8)
 
     # 3. 评估
     log("\n>>> 训练完成，开始评估...")
+    if status_callback: status_callback("Generating Timeline...", 0.95)
 
     # 创建评估环境 (单线程)
     eval_env = MonkEnv(current_talents=talents, player_kwargs=player_kwargs)
