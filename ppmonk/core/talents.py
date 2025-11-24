@@ -38,56 +38,68 @@ class SpellModTalent(Talent):
                 else: setattr(spell, self.attr_name, base + self.value)
                 if self.attr_name == 'ap_coeff': spell.update_tick_coeff()
 
-# --- 核心机制天赋 ---
+# --- 机制类天赋 ---
 class MomentumBoostTalent(Talent):
     def apply(self, player, spell_book):
         if 'FOF' in spell_book.spells:
             fof = spell_book.spells['FOF']
-            fof.haste_dmg_scaling = True
-            fof.tick_dmg_ramp = 0.10
+            # 开启急速收益和叠层
+            if hasattr(fof, 'haste_dmg_scaling'): fof.haste_dmg_scaling = True
+            if hasattr(fof, 'tick_dmg_ramp'): fof.tick_dmg_ramp = 0.10
 
 class CombatWisdomTalent(Talent):
     def apply(self, player, spell_book):
-        player.combat_wisdom_ready = True
-        player.combat_wisdom_timer = 0.0
+        if hasattr(player, 'combat_wisdom_ready'):
+            player.combat_wisdom_ready = True
+            player.combat_wisdom_timer = 0.0
 
 class PlaceholderTalent(Talent):
     def apply(self, player, spell_book): pass
 
-# --- 天赋数据库 ---
+# --- 天赋数据库 (核心修复：添加坐标 ID 映射) ---
 TALENT_DB = {
-    # [必须] 这是解锁 FOF 的唯一钥匙
-    '1-1': UnlockSpellTalent('Fists of Fury', 'FOF'),
+    # Row 1
+    '1-1': UnlockSpellTalent('Fists of Fury', 'FOF'),  # [关键] UI传 1-1 时解锁 FOF
 
-    # 机制天赋
+    # Row 2
     '2-1': MomentumBoostTalent('Momentum Boost'),
     '2-2': CombatWisdomTalent('Combat Wisdom'),
     '2-3': PlaceholderTalent('Sharp Reflexes'),
 
-    # 占位符 (保持结构完整)
+    # Row 3
     '3-1': PlaceholderTalent('Touch of the Tiger'),
     '3-2': PlaceholderTalent('Ferociousness'),
     '3-3': PlaceholderTalent('Hardened Soles'),
     '3-4': StatModTalent('Ascension', 'max_energy', 20.0),
+
+    # Row 4
     '4-1': PlaceholderTalent('Dual Threat'),
     '4-2': PlaceholderTalent('Teachings of the Monastery'),
     '4-3': PlaceholderTalent('Glory of the Dawn'),
+
+    # Row 5
     '5-1': PlaceholderTalent('Crane Vortex'),
     '5-2': PlaceholderTalent('Meridian Strikes'),
     '5-3': PlaceholderTalent('Rising Star'),
     '5-4': PlaceholderTalent('Zenith'),
     '5-5': PlaceholderTalent('Hit Combo'),
     '5-6': PlaceholderTalent('Brawler Intensity'),
+
+    # Row 6
     '6-1': PlaceholderTalent('Jade Ignition'),
     '6-2': PlaceholderTalent('Cyclone Choice'),
     '6-3': PlaceholderTalent('Horn Choice'),
     '6-4': PlaceholderTalent('Obsidian Spiral'),
     '6-5': PlaceholderTalent('Combo Breaker'),
+
+    # Row 7
     '7-1': PlaceholderTalent('Dance of Chi-Ji'),
     '7-2': PlaceholderTalent('Shadowboxing Treads'),
     '7-3': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
     '7-4': PlaceholderTalent('Energy Burst'),
     '7-5': PlaceholderTalent('Inner Peace'),
+
+    # Row 8
     '8-1': PlaceholderTalent('Tiger Eye Brew'),
     '8-2': PlaceholderTalent('Sequenced Strikes'),
     '8-3': PlaceholderTalent('Sunfire Spiral'),
@@ -95,6 +107,8 @@ TALENT_DB = {
     '8-5': PlaceholderTalent('Revolving Choice'),
     '8-6': PlaceholderTalent('Universal Energy'),
     '8-7': PlaceholderTalent('Memory of Monastery'),
+
+    # Row 9
     '9-1': PlaceholderTalent('TEB Buff'),
     '9-2': PlaceholderTalent('RJW'),
     '9-3': PlaceholderTalent('Xuens Battlegear'),
@@ -103,6 +117,8 @@ TALENT_DB = {
     '9-6': PlaceholderTalent('Knowledge'),
     '9-7': UnlockSpellTalent('Slicing Winds', 'SW'),
     '9-8': PlaceholderTalent('Jadefire Stomp'),
+
+    # Row 10
     '10-1': PlaceholderTalent('TEB Final'),
     '10-2': PlaceholderTalent('Skyfire Heel'),
     '10-3': PlaceholderTalent('Harmonic Combo'),
@@ -111,7 +127,7 @@ TALENT_DB = {
     '10-6': PlaceholderTalent('Airborne Rhythm'),
     '10-7': PlaceholderTalent('Path of Jade'),
 
-    # 兼容旧代码
+    # --- 兼容旧名称 (防止旧代码报错) ---
     'WDP': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
     'SW': UnlockSpellTalent('Slicing Winds', 'SW'),
     'SOTWL': UnlockSpellTalent('Strike of the Windlord', 'SOTWL'),
@@ -119,7 +135,11 @@ TALENT_DB = {
 }
 
 class TalentManager:
-    def apply_talents(self, talent_names, player, spell_book):
-        for name in talent_names:
-            if name in TALENT_DB:
-                TALENT_DB[name].apply(player, spell_book)
+    def apply_talents(self, talent_ids, player, spell_book):
+        # print(f"DEBUG: Applying talents: {talent_ids}") # 调试用
+        for tid in talent_ids:
+            if tid in TALENT_DB:
+                TALENT_DB[tid].apply(player, spell_book)
+            else:
+                # print(f"Warning: Talent ID {tid} not found in DB")
+                pass
