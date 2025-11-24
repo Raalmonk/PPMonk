@@ -52,6 +52,13 @@ class CombatWisdomTalent(Talent):
         player.combat_wisdom_timer = 0.0
 
 
+class SharpReflexesTalent(Talent):
+    def apply(self, player, spell_book):
+        if not hasattr(player, 'talents_procs'):
+            player.talents_procs = {}
+        pass
+
+
 class PlaceholderTalent(Talent):
     def apply(self, player, spell_book):
         # Placeholder for yet-to-be-implemented talent effects
@@ -66,7 +73,7 @@ TALENT_DB = {
     # --- 第二层 ---
     '2-1': MomentumBoostTalent('Momentum Boost'),
     '2-2': CombatWisdomTalent('Combat Wisdom'),
-    '2-3': PlaceholderTalent('Sharp Reflexes'),
+    '2-3': SharpReflexesTalent('Sharp Reflexes'),
 
     # Row 3
     '3-1': PlaceholderTalent('Touch of the Tiger'),
