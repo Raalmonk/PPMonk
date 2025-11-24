@@ -57,6 +57,31 @@ class SpellModTalent(Talent):
                     spell.update_tick_coeff()
 
 
+class MomentumBoostTalent(Talent):
+    """
+    Momentum Boost (2-1):
+    - Fists of Fury damage increased by Haste.
+    - Fists of Fury deals 10% more damage per tick (stacking).
+    """
+
+    def apply(self, player, spell_book):
+        if 'FOF' in spell_book.spells:
+            fof = spell_book.spells['FOF']
+            fof.haste_dmg_scaling = True
+            fof.tick_dmg_ramp = 0.10
+
+
+class CombatWisdomTalent(Talent):
+    """
+    Combat Wisdom (2-2):
+    - Passive: Out of combat Chi = 2 (handled in Player init).
+    - Every 15s, next Tiger Palm deals 30% extra damage and casts Expel Harm.
+    """
+
+    def apply(self, player, spell_book):
+        player.has_combat_wisdom = True
+
+
 class PlaceholderTalent(Talent):
     """尚未实现逻辑的占位符"""
     def apply(self, player, spell_book):
@@ -71,8 +96,8 @@ TALENT_DB = {
     '1-1': UnlockSpellTalent('Fists of Fury', 'FOF'), # 假设 FOF 默认是隐藏的，需要点天赋
 
     # Row 2
-    '2-1': PlaceholderTalent('Momentum Boost'),
-    '2-2': PlaceholderTalent('Combat Wisdom'),
+    '2-1': MomentumBoostTalent('Momentum Boost'),
+    '2-2': CombatWisdomTalent('Combat Wisdom'),
     '2-3': PlaceholderTalent('Sharp Reflexes'),
 
     # Row 3

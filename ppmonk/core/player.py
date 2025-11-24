@@ -31,6 +31,11 @@ class PlayerState:
         self.mastery = 0.0
         self.update_stats()
 
+        # Combat Wisdom tracking
+        self.has_combat_wisdom = False
+        self.combat_wisdom_timer = 0.0
+        self.combat_wisdom_ready = True
+
     def update_stats(self):
         self.crit = (self.rating_crit / 4600.0) + self.base_crit
         self.versatility = (self.rating_vers / 5400.0)
@@ -56,13 +61,20 @@ class PlayerState:
             if self.gcd_remaining > 0:
                 self.gcd_remaining = max(0, self.gcd_remaining - step)
 
+            if self.has_combat_wisdom and not self.combat_wisdom_ready:
+                self.combat_wisdom_timer -= step
+                if self.combat_wisdom_timer <= 0:
+                    self.combat_wisdom_ready = True
+                    self.combat_wisdom_timer = 0
+
             if self.is_channeling:
                 self.channel_time_remaining -= step
                 self.time_until_next_tick -= step
                 if self.time_until_next_tick <= 1e-6:
                     if self.channel_ticks_remaining > 0:
                         spell = self.current_channel_spell
-                        tick_dmg = spell.calculate_tick_damage(self)
+                        tick_idx = spell.total_ticks - self.channel_ticks_remaining
+                        tick_dmg = spell.calculate_tick_damage(self, tick_idx=tick_idx)
                         total_damage += tick_dmg
                         self.channel_ticks_remaining -= 1
                         self.time_until_next_tick += self.channel_tick_interval
