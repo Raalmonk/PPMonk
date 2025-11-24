@@ -58,7 +58,12 @@ def run_simulation(
     log(f">>> 初始化 PPMonk (UI 模式)...")
     log(f"  天赋: {talents}")
     log(f"  属性: {player_kwargs}")
-
+    import torch
+    print(f"CUDA Available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"Device Name: {torch.cuda.get_device_name(0)}")
+    else:
+        print("WARNING: Running on CPU! This will be slow.")
     # 1. 初始化环境
     num_cpu = 8
     env = SubprocVecEnv([make_env(i, talents, player_kwargs) for i in range(num_cpu)])

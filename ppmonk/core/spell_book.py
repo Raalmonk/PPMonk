@@ -22,7 +22,7 @@ class Spell:
         self.current_cd = 0.0
         self.is_combo_strike = True
 
-        # [修复] 必须初始化这些属性
+        # [关键] 初始化机制属性
         self.haste_dmg_scaling = False
         self.tick_dmg_ramp = 0.0
         self.triggers_combat_wisdom = False
@@ -60,7 +60,7 @@ class Spell:
         else:
             player.gcd_remaining = 1.0
 
-        # [修复] Combat Wisdom 触发逻辑
+        # [关键] Combat Wisdom 触发
         extra_damage = 0.0
         if self.triggers_combat_wisdom and getattr(player, 'combat_wisdom_ready', False):
             player.combat_wisdom_ready = False
@@ -128,7 +128,7 @@ class SpellBook:
             'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
             'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
 
-            # [重要] req_talent=True, 必须由 '1-1' 解锁
+            # [重要] 这里的 req_talent=True 意味着如果没收到 '1-1' 天赋，FOF 就废了
             'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0,
                          cast_haste=True, req_talent=True),
 
@@ -137,9 +137,7 @@ class SpellBook:
             'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4)
         }
 
-        # 标记 TP 触发器
         self.spells['TP'].triggers_combat_wisdom = True
-
         self.active_talents = active_talents if active_talents else []
         self.talent_manager = TalentManager()
 

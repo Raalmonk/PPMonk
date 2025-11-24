@@ -38,7 +38,7 @@ class SpellModTalent(Talent):
                 else: setattr(spell, self.attr_name, base + self.value)
                 if self.attr_name == 'ap_coeff': spell.update_tick_coeff()
 
-# --- 新增：机制类天赋 ---
+# --- 核心机制天赋 ---
 class MomentumBoostTalent(Talent):
     def apply(self, player, spell_book):
         if 'FOF' in spell_book.spells:
@@ -54,17 +54,17 @@ class CombatWisdomTalent(Talent):
 class PlaceholderTalent(Talent):
     def apply(self, player, spell_book): pass
 
-# --- 修复后的天赋数据库 ---
+# --- 天赋数据库 ---
 TALENT_DB = {
-    # [重要] 只有加了这行，UI传 '1-1' 时才能解锁怒雷破
+    # [必须] 这是解锁 FOF 的唯一钥匙
     '1-1': UnlockSpellTalent('Fists of Fury', 'FOF'),
 
-    # [重要] 恢复前三层机制
+    # 机制天赋
     '2-1': MomentumBoostTalent('Momentum Boost'),
     '2-2': CombatWisdomTalent('Combat Wisdom'),
-    '2-3': PlaceholderTalent('Sharp Reflexes'), # 你可以在这里换成真实的 Proc 逻辑
+    '2-3': PlaceholderTalent('Sharp Reflexes'),
 
-    # 占位符保持不变，防止 UI 报错
+    # 占位符 (保持结构完整)
     '3-1': PlaceholderTalent('Touch of the Tiger'),
     '3-2': PlaceholderTalent('Ferociousness'),
     '3-3': PlaceholderTalent('Hardened Soles'),
@@ -79,8 +79,8 @@ TALENT_DB = {
     '5-5': PlaceholderTalent('Hit Combo'),
     '5-6': PlaceholderTalent('Brawler Intensity'),
     '6-1': PlaceholderTalent('Jade Ignition'),
-    '6-2': PlaceholderTalent('Choice Node'),
-    '6-3': PlaceholderTalent('Choice Node'),
+    '6-2': PlaceholderTalent('Cyclone Choice'),
+    '6-3': PlaceholderTalent('Horn Choice'),
     '6-4': PlaceholderTalent('Obsidian Spiral'),
     '6-5': PlaceholderTalent('Combo Breaker'),
     '7-1': PlaceholderTalent('Dance of Chi-Ji'),
@@ -92,7 +92,7 @@ TALENT_DB = {
     '8-2': PlaceholderTalent('Sequenced Strikes'),
     '8-3': PlaceholderTalent('Sunfire Spiral'),
     '8-4': PlaceholderTalent('Communion with Wind'),
-    '8-5': PlaceholderTalent('Choice Node'),
+    '8-5': PlaceholderTalent('Revolving Choice'),
     '8-6': PlaceholderTalent('Universal Energy'),
     '8-7': PlaceholderTalent('Memory of Monastery'),
     '9-1': PlaceholderTalent('TEB Buff'),
@@ -111,7 +111,7 @@ TALENT_DB = {
     '10-6': PlaceholderTalent('Airborne Rhythm'),
     '10-7': PlaceholderTalent('Path of Jade'),
 
-    # 兼容旧名称
+    # 兼容旧代码
     'WDP': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
     'SW': UnlockSpellTalent('Slicing Winds', 'SW'),
     'SOTWL': UnlockSpellTalent('Strike of the Windlord', 'SOTWL'),
@@ -119,7 +119,7 @@ TALENT_DB = {
 }
 
 class TalentManager:
-    def apply_talents(self, talent_ids, player, spell_book):
-        for tid in talent_ids:
-            if tid in TALENT_DB:
-                TALENT_DB[tid].apply(player, spell_book)
+    def apply_talents(self, talent_names, player, spell_book):
+        for name in talent_names:
+            if name in TALENT_DB:
+                TALENT_DB[name].apply(player, spell_book)
