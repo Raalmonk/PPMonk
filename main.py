@@ -36,7 +36,8 @@ def run_simulation(
         vers_rating=500,
         talents=None,
         scenario_name="Patchwerk",
-        log_callback=print
+        log_callback=print,
+        status_callback=None  # [修复 1] 接收 UI 传来的状态回调，防止报错
 ):
     if talents is None: talents = ['WDP', 'SW', 'Ascension']
 
@@ -64,6 +65,8 @@ def run_simulation(
     log(f"  设备: {device}")
 
     # 2. 训练
+    if status_callback: status_callback("Training AI Model...", 0.1)
+
     model = MaskablePPO(
         "MlpPolicy",
         env,
@@ -78,6 +81,8 @@ def run_simulation(
 
     log(">>> 开始训练 (Steps: 500,000)...")
     model.learn(total_timesteps=500000)
+
+    if status_callback: status_callback("Evaluating Strategy...", 0.8)
 
     # 3. 评估
     log("\n>>> 训练完成，开始评估...")
@@ -134,6 +139,11 @@ def run_simulation(
     log(f"  Mast   : {p.mastery * 100:.2f}%")
     log(f"  Vers   : {p.versatility * 100:.2f}%")
     log(f"{'=' * 40}\n")
+
+    if status_callback: status_callback("Complete", 1.0)
+
+    # [修复 2] 返回结果给 UI 显示
+    return {"total_ap": total_ap, "scenario": scenario_name}
 
 
 if __name__ == '__main__':
