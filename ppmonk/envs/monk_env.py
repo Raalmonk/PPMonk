@@ -14,7 +14,7 @@ from ppmonk.core.timeline import Timeline
 class MonkEnv(gym.Env):
     """Main training environment."""
 
-    def __init__(self, seed_offset=0, current_talents=None):
+    def __init__(self, seed_offset=0, current_talents=None, player_kwargs=None):
         self.observation_space = spaces.Box(low=0, high=1, shape=(37,), dtype=np.float32)
         self.action_space = spaces.Discrete(9)
         self.action_map = {0: 'Wait', 1: 'TP', 2: 'BOK', 3: 'RSK', 4: 'SCK', 5: 'FOF', 6: 'WDP', 7: 'SOTWL', 8: 'SW'}
@@ -25,13 +25,14 @@ class MonkEnv(gym.Env):
         self.rng = np.random.default_rng(seed_offset)
 
         self.current_talents = current_talents if current_talents is not None else ['WDP', 'SW', 'Ascension']
+        self.player_kwargs = player_kwargs or {}
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         if seed is not None:
             self.rng = np.random.default_rng(seed)
 
-        self.player = PlayerState()
+        self.player = PlayerState(**self.player_kwargs)
         self.book = SpellBook(active_talents=self.current_talents)
         self.book.apply_talents(self.player)
 
