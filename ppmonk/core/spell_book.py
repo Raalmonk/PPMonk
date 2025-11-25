@@ -1,3 +1,5 @@
+import random
+
 from .talents import TalentManager
 
 
@@ -22,6 +24,10 @@ class Spell:
         self.current_cd = 0.0
         self.is_combo_strike = True
 
+        # [暴击] 天赋强化字段
+        self.bonus_crit_chance = 0.0
+        self.crit_damage_bonus = 0.0
+
         # [修复] 初始化机制属性
         self.haste_dmg_scaling = False
         self.tick_dmg_ramp = 0.0
@@ -31,25 +37,32 @@ class Spell:
         self.tick_coeff = self.ap_coeff / self.total_ticks if self.total_ticks > 0 else self.ap_coeff
 
     def get_effective_cd(self, player):
-        if self.cd_haste: return self.base_cd / (1.0 + player.haste)
+        if self.cd_haste:
+            return self.base_cd / (1.0 + player.haste)
         return self.base_cd
 
     def get_effective_cast_time(self, player):
-        if self.cast_haste: return self.base_cast_time / (1.0 + player.haste)
+        if self.cast_haste:
+            return self.base_cast_time / (1.0 + player.haste)
         return self.base_cast_time
 
     def get_tick_interval(self, player):
-        if not self.is_channeled or self.total_ticks <= 0: return 0
+        if not self.is_channeled or self.total_ticks <= 0:
+            return 0
         return self.get_effective_cast_time(player) / self.total_ticks
 
     def is_usable(self, player, other_spells=None):
-        if not self.is_known: return False
-        if self.current_cd > 0.01: return False
-        if player.energy < self.energy_cost: return False
-        if player.chi < self.chi_cost: return False
+        if not self.is_known:
+            return False
+        if self.current_cd > 0.01:
+            return False
+        if player.energy < self.energy_cost:
+            return False
+        if player.chi < self.chi_cost:
+            return False
         return True
 
-    def cast(self, player):
+    def cast(self, player, spell_book=None):
         player.energy -= self.energy_cost
         player.chi = max(0, player.chi - self.chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen)
@@ -69,7 +82,7 @@ class Spell:
             extra_damage += eh_dmg
 
         triggers_mastery = self.is_combo_strike and (player.last_spell_name is not None) and (
-                    player.last_spell_name != self.abbr)
+                player.last_spell_name != self.abbr)
         player.last_spell_name = self.abbr
 
         if self.is_channeled:
@@ -84,8 +97,25 @@ class Spell:
             return 0.0
         else:
             base_dmg = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
-            if extra_damage > 0: base_dmg *= 1.30
-            return base_dmg + extra_damage
+            if extra_damage > 0:
+                base_dmg *= 1.30
+            total_dmg = base_dmg + extra_damage
+
+        if self.abbr == 'BOK' and getattr(player, 'has_sharp_reflexes', False) and spell_book is not None:
+            rsk = spell_book.spells.get('RSK')
+            fof = spell_book.spells.get('FOF')
+            for target in (rsk, fof):
+                if target is not None:
+                    target.current_cd = max(0.0, target.current_cd - 1.0)
+            print(f"[DEBUG] Sharp Reflexes triggered! RSK/FOF CD reduced.")
+
+        if self.abbr == 'Xuen':
+            player.xuen_active = True
+            player.xuen_timer = getattr(self, 'duration', 20.0)
+            player.update_stats()
+            print(f"[DEBUG] Xuen activated for {player.xuen_timer} seconds. Current crit: {player.crit * 100:.2f}%")
+
+        return total_dmg
 
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
         dmg = self.tick_coeff
@@ -101,17 +131,31 @@ class Spell:
         elif self.is_channeled:
             apply_mastery = player.channel_mastery_snapshot
 
-        if apply_mastery: dmg *= (1.0 + player.mastery)
+        if apply_mastery:
+            dmg *= (1.0 + player.mastery)
         dmg *= (1.0 + player.versatility)
+
+        crit_chance = player.get_crit_chance(self) if hasattr(player, 'get_crit_chance') else player.crit
+        if getattr(player, 'xuen_active', False) and getattr(player, 'ferociousness_rank', 0) > 0:
+            print(f"[DEBUG] Xuen active: crit chance boosted to {crit_chance * 100:.2f}%")
+
+        is_crit = random.random() < crit_chance
+        crit_multiplier = 2.0 + self.crit_damage_bonus
+        if is_crit:
+            dmg *= crit_multiplier
+            if self.abbr == 'BOK':
+                print(f"[DEBUG] BOK crit! Crit multiplier: {crit_multiplier:.2f}")
         return dmg
 
     def tick_cd(self, dt):
-        if self.current_cd > 0: self.current_cd = max(0, self.current_cd - dt)
+        if self.current_cd > 0:
+            self.current_cd = max(0, self.current_cd - dt)
 
 
 class SpellWDP(Spell):
     def is_usable(self, player, other_spells):
-        if not super().is_usable(player): return False
+        if not super().is_usable(player):
+            return False
         rsk = other_spells['RSK'];
         fof = other_spells['FOF']
         return rsk.current_cd > 0 and fof.current_cd > 0
@@ -148,4 +192,5 @@ class SpellBook:
         self.talent_manager.apply_talents(self.active_talents, player, self)
 
     def tick(self, dt):
-        for s in self.spells.values(): s.tick_cd(dt)
+        for s in self.spells.values():
+            s.tick_cd(dt)

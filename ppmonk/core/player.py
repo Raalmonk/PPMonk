@@ -14,6 +14,14 @@ class PlayerState:
         self.max_chi = 6
         self.chi = 2 # Combat Wisdom 让脱战 Chi 为 2，默认设为 2 即可
 
+        # [新增] 旭日天赋交互
+        self.xuen_active = False
+        self.xuen_timer = 0.0
+
+        # [新增] 天赋状态
+        self.ferociousness_rank = 0
+        self.has_sharp_reflexes = False
+
         # [新增] Combat Wisdom 计时器
         self.combat_wisdom_ready = False 
         self.combat_wisdom_timer = 0.0
@@ -33,7 +41,13 @@ class PlayerState:
         self.update_stats()
 
     def update_stats(self):
-        self.crit = (self.rating_crit / 4600.0) + self.base_crit
+        base_crit = (self.rating_crit / 4600.0) + self.base_crit
+        ferocious_bonus = 0.0
+        if self.ferociousness_rank > 0:
+            ferocious_bonus = 0.02 * self.ferociousness_rank
+            if self.xuen_active:
+                ferocious_bonus *= 2
+        self.crit = base_crit + ferocious_bonus
         self.versatility = (self.rating_vers / 5400.0)
         self.haste = (self.rating_haste / 4400.0)
         dr_threshold = 1380
@@ -42,6 +56,12 @@ class PlayerState:
             excess = self.rating_mastery - dr_threshold
             eff_mast_rating = dr_threshold + (excess * 0.9)
         self.mastery = (eff_mast_rating / 2000.0) + self.base_mastery
+
+    def get_crit_chance(self, spell=None):
+        crit_chance = self.crit
+        if spell is not None and hasattr(spell, 'bonus_crit_chance'):
+            crit_chance += spell.bonus_crit_chance
+        return crit_chance
 
     def advance_time(self, duration):
         total_damage = 0
@@ -52,6 +72,12 @@ class PlayerState:
         while elapsed < duration:
             step = min(dt, duration - elapsed)
             self.energy = min(self.max_energy, self.energy + regen_rate * step)
+
+            if self.xuen_active:
+                self.xuen_timer = max(0.0, self.xuen_timer - step)
+                if self.xuen_timer <= 1e-6:
+                    self.xuen_active = False
+                    self.update_stats()
 
             if self.gcd_remaining > 0:
                 self.gcd_remaining = max(0, self.gcd_remaining - step)

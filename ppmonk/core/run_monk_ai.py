@@ -339,7 +339,7 @@ class MonkEnv(gym.Env):
             if spell.current_cd > 0.01:
                 return self._get_obs(), -10.0, False, False, {'damage': 0}
 
-            dmg = spell.cast(self.player)
+            dmg = spell.cast(self.player, self.book)
             _, current_mod, _ = self.timeline.get_status(self.time)
             total_damage += dmg * current_mod
 
