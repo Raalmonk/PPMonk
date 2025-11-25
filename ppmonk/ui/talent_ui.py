@@ -1,188 +1,273 @@
 import customtkinter as ctk
 import tkinter as tk
 
-# --- 天赋树数据结构 ---
-# 网格设计: 7列 (0-6), 中心是 Col 3
-# 逻辑: req 列表中的任意一个满足即可解锁 (OR逻辑)
+# --- UI 配置常量 ---
+CANVAS_WIDTH = 1600
+CANVAS_HEIGHT = 1300
+NODE_WIDTH = 100
+NODE_HEIGHT = 55
+X_GAP = 150
+Y_GAP = 110
+
+# --- 天赋树数据 (支持 Choice Node) ---
+# 对于 is_choice=True 的节点，增加 choices 列表
+# 保存时：Choice 0 -> id; Choice 1 -> id + "_b"
 MONK_TALENT_DATA = [
-    # --- Row 1 (Index 0) ---
-    {"id": "1-1", "label": "Fists of Fury", "row": 0, "col": 3, "max_rank": 1, "req": []},
+    # --- Row 1 ---
+    {"id": "1-1", "label": "Fists of Fury", "row": 0, "col": 4, "max_rank": 1, "req": []},
 
-    # --- Row 2 (Index 1) ---
-    {"id": "2-1", "label": "Momentum\nBoost", "row": 1, "col": 2, "max_rank": 1, "req": ["1-1"]},
-    {"id": "2-2", "label": "Combat\nWisdom", "row": 1, "col": 3, "max_rank": 1, "req": ["1-1"]},
-    {"id": "2-3", "label": "Sharp\nReflexes", "row": 1, "col": 4, "max_rank": 1, "req": ["1-1"]},
+    # --- Row 2 ---
+    {"id": "2-1", "label": "Momentum\nBoost", "row": 1, "col": 3, "max_rank": 1, "req": ["1-1"]},
+    {"id": "2-2", "label": "Combat\nWisdom", "row": 1, "col": 4, "max_rank": 1, "req": ["1-1"]},
+    {"id": "2-3", "label": "Sharp\nReflexes", "row": 1, "col": 5, "max_rank": 1, "req": ["1-1"]},
 
-    # --- Row 3 (Index 2) ---
-    {"id": "3-1", "label": "Touch of\nthe Tiger", "row": 2, "col": 1, "max_rank": 1, "req": ["2-1"]},
-    {"id": "3-2", "label": "Ferociousness", "row": 2, "col": 2, "max_rank": 2, "req": ["2-1"]},
-    {"id": "3-3", "label": "Hardened\nSoles", "row": 2, "col": 4, "max_rank": 2, "req": ["2-3"]},
-    {"id": "3-4", "label": "Ascension", "row": 2, "col": 5, "max_rank": 1, "req": ["2-3"]},
+    # --- Row 3 ---
+    {"id": "3-1", "label": "Touch of\nthe Tiger", "row": 2, "col": 2, "max_rank": 1, "req": ["2-1"]},
+    {"id": "3-2", "label": "Ferociousness", "row": 2, "col": 3, "max_rank": 2, "req": ["2-1"]},
+    {"id": "3-3", "label": "Hardened\nSoles", "row": 2, "col": 5, "max_rank": 2, "req": ["2-3"]},
+    {"id": "3-4", "label": "Ascension", "row": 2, "col": 6, "max_rank": 1, "req": ["2-3"]},
 
-    # --- Row 4 (Index 3) ---
-    {"id": "4-1", "label": "Dual\nThreat", "row": 3, "col": 1, "max_rank": 1, "req": ["3-1", "3-2"]}, # 3-1 OR 3-2
-    {"id": "4-2", "label": "Teachings of\nMonastery", "row": 3, "col": 3, "max_rank": 1, "req": ["2-2"]},
-    {"id": "4-3", "label": "Glory of\nthe Dawn", "row": 3, "col": 5, "max_rank": 1, "req": ["3-3", "3-4"]},
+    # --- Row 4 ---
+    {"id": "4-1", "label": "Dual\nThreat", "row": 3, "col": 2, "max_rank": 1, "req": ["3-1", "3-2"]},
+    {"id": "4-2", "label": "Teachings of\nMonastery", "row": 3, "col": 4, "max_rank": 1, "req": ["2-2"]},
+    {"id": "4-3", "label": "Glory of\nthe Dawn", "row": 3, "col": 6, "max_rank": 1, "req": ["3-3", "3-4"]},
 
-    # --- Row 5 (Index 4) ---
-    # 4-1 leads to 5-1, 5-2, 5-3. Expanding left side.
-    {"id": "5-1", "label": "Crane\nVortex", "row": 4, "col": 0, "max_rank": 1, "req": ["4-1"]},
-    {"id": "5-2", "label": "Meridian\nStrikes", "row": 4, "col": 1, "max_rank": 1, "req": ["4-1"]},
-    {"id": "5-3", "label": "Rising\nStar", "row": 4, "col": 2, "max_rank": 1, "req": ["4-1"]},
-    {"id": "5-4", "label": "Zenith", "row": 4, "col": 3, "max_rank": 1, "req": ["4-2"]},
-    {"id": "5-5", "label": "Hit\nCombo", "row": 4, "col": 4, "max_rank": 1, "req": ["4-3"]},
-    {"id": "5-6", "label": "Brawler's\nIntensity", "row": 4, "col": 6, "max_rank": 1, "req": ["4-3"]},
+    # --- Row 5 ---
+    {"id": "5-1", "label": "Crane\nVortex", "row": 4, "col": 1, "max_rank": 1, "req": ["4-1"]},
+    {"id": "5-2", "label": "Meridian\nStrikes", "row": 4, "col": 2, "max_rank": 1, "req": ["4-1"]},
+    {"id": "5-3", "label": "Rising\nStar", "row": 4, "col": 3, "max_rank": 1, "req": ["4-1", "4-2"]},
+    {"id": "5-4", "label": "Zenith", "row": 4, "col": 4, "max_rank": 1, "req": ["4-2"]},
+    {"id": "5-5", "label": "Hit\nCombo", "row": 4, "col": 5, "max_rank": 1, "req": ["4-2", "4-3"]},
+    {"id": "5-6", "label": "Brawler's\nIntensity", "row": 4, "col": 7, "max_rank": 1, "req": ["4-3"]},
 
-    # --- Row 6 (Index 5) ---
-    {"id": "6-1", "label": "Jade\nIgnition", "row": 5, "col": 0, "max_rank": 1, "req": ["5-1"]},
-    {"id": "6-2", "label": "Cyclone's Drift\n/ Crashing Fists", "row": 5, "col": 1, "max_rank": 1, "req": ["5-1", "5-2", "5-3"]}, # Choice Node
-    {"id": "6-3", "label": "Drinking Horn\n/ Spirit Focus", "row": 5, "col": 3, "max_rank": 1, "req": ["5-4"]}, # Choice Node
-    {"id": "6-4", "label": "Obsidian\nSpiral", "row": 5, "col": 4, "max_rank": 1, "req": ["5-4"]}, # Careful with overlap, moved slightly right? visual only
+    # --- Row 6 (含 Choice) ---
+    {"id": "6-1", "label": "Jade\nIgnition", "row": 5, "col": 1, "max_rank": 1, "req": ["5-1"]},
+
+    # Choice 1: Cyclone's Drift / Crashing Fists
+    {"id": "6-2", "label": "Cyclone's\nDrift", "row": 5, "col": 2, "max_rank": 1, "req": ["5-1", "5-2", "5-3"],
+     "is_choice": True, "choices": ["Cyclone's\nDrift", "Crashing\nFists"]},
+
+    # Choice 2: Drinking Horn Cover / Spiritual Focus
+    {"id": "6-3", "label": "Spiritual\nFocus", "row": 5, "col": 3, "max_rank": 1, "req": ["5-4"],
+     "is_choice": True, "choices": ["Spiritual\nFocus", "Drinking\nHorn Cover"]},
+
+    {"id": "6-4", "label": "Obsidian\nSpiral", "row": 5, "col": 5, "max_rank": 1, "req": ["5-4"]},
     {"id": "6-5", "label": "Combo\nBreaker", "row": 5, "col": 6, "max_rank": 1, "req": ["5-5", "5-6"]},
 
-    # --- Row 7 (Index 6) ---
-    {"id": "7-1", "label": "Dance of\nChi-Ji", "row": 6, "col": 0, "max_rank": 1, "req": ["6-1", "6-2", "6-3"]},
-    {"id": "7-2", "label": "Shadowboxing\nTreads", "row": 6, "col": 2, "max_rank": 1, "req": ["6-2", "6-3"]},
-    {"id": "7-3", "label": "SOTWL\n/ WDP", "row": 6, "col": 3, "max_rank": 1, "req": ["5-4"]}, # Middle req 5-4 directly? Text says 5-4.
-    {"id": "7-4", "label": "Energy\nBurst", "row": 6, "col": 5, "max_rank": 1, "req": ["6-5"]},
-    {"id": "7-5", "label": "Inner\nPeace", "row": 6, "col": 6, "max_rank": 1, "req": ["6-5"]},
+    # --- Row 7 (含 Choice) ---
+    {"id": "7-1", "label": "Dance of\nChi-Ji", "row": 6, "col": 2, "max_rank": 1, "req": ["6-1", "6-2"]},
+    {"id": "7-2", "label": "Shadowboxing\nTreads", "row": 6, "col": 3, "max_rank": 1, "req": ["6-2", "6-3"]},
 
-    # --- Row 8 (Index 7) ---
-    {"id": "8-1", "label": "Tiger Eye\nBrew (Base)", "row": 7, "col": 0, "max_rank": 1, "req": []}, # No req? Text says "no Prerequisite" (odd for row 8, maybe separate tree?)
+    # Choice 3: WDP / SOTWL
+    {"id": "7-3", "label": "Whirling\nDragon Punch", "row": 6, "col": 4, "max_rank": 1, "req": ["5-4"],
+     "is_choice": True, "choices": ["Whirling\nDragon Punch", "Strike of\nWindlord"]},
+
+    {"id": "7-4", "label": "Energy\nBurst", "row": 6, "col": 5, "max_rank": 1, "req": ["6-5"]},
+    {"id": "7-5", "label": "Inner\nPeace", "row": 6, "col": 7, "max_rank": 1, "req": ["6-5"]},
+
+    # --- Row 8 (含 Choice) ---
+    {"id": "8-1", "label": "Tiger Eye\nBrew", "row": 7, "col": 0, "max_rank": 1, "req": []},
     {"id": "8-2", "label": "Sequenced\nStrikes", "row": 7, "col": 1, "max_rank": 1, "req": ["7-1"]},
     {"id": "8-3", "label": "Sunfire\nSpiral", "row": 7, "col": 2, "max_rank": 1, "req": ["7-2"]},
     {"id": "8-4", "label": "Communion\nw/ Wind", "row": 7, "col": 3, "max_rank": 1, "req": ["7-3"]},
-    {"id": "8-5", "label": "Revolving Whirl\n/ Echo Tech", "row": 7, "col": 4, "max_rank": 1, "req": ["7-3"]},
+
+    # Choice 4: Echo / Revolving
+    {"id": "8-5", "label": "Echo\nTechnique", "row": 7, "col": 4, "max_rank": 1, "req": ["7-3"],
+     "is_choice": True, "choices": ["Echo\nTechnique", "Revolving\nWhirl"]},
+
     {"id": "8-6", "label": "Universal\nEnergy", "row": 7, "col": 5, "max_rank": 1, "req": ["7-3", "7-4"]},
     {"id": "8-7", "label": "Memory of\nMonastery", "row": 7, "col": 6, "max_rank": 1, "req": ["7-4", "7-5"]},
 
-    # --- Row 9 (Index 8) ---
-    {"id": "9-1", "label": "Tiger Eye\nBuff", "row": 8, "col": 0, "max_rank": 1, "req": ["8-1"]},
+    # --- Row 9 ---
+    {"id": "9-1", "label": "TEB\nBuff", "row": 8, "col": 0, "max_rank": 1, "req": ["8-1"]},
     {"id": "9-2", "label": "Rushing\nJade Wind", "row": 8, "col": 1, "max_rank": 1, "req": ["8-2"]},
     {"id": "9-3", "label": "Xuen's\nBattlegear", "row": 8, "col": 2, "max_rank": 1, "req": ["8-2", "8-3", "8-4"]},
     {"id": "9-4", "label": "Thunderfist", "row": 8, "col": 3, "max_rank": 1, "req": ["8-5"]},
     {"id": "9-5", "label": "Weapon of\nWind", "row": 8, "col": 4, "max_rank": 1, "req": ["8-5"]},
-    {"id": "9-6", "label": "Knowl. Broken\nTemple", "row": 8, "col": 5, "max_rank": 1, "req": ["8-5", "8-6"]},
+    {"id": "9-6", "label": "Knowledge\nTemple", "row": 8, "col": 5, "max_rank": 1, "req": ["8-5", "8-6"]},
     {"id": "9-7", "label": "Slicing\nWinds", "row": 8, "col": 6, "max_rank": 1, "req": ["8-6", "8-7"]},
-    {"id": "9-8", "label": "Jadefire\nStomp", "row": 8, "col": 7, "max_rank": 1, "req": ["8-7"]}, # Col 7 overflow, adjust grid or put far right
+    {"id": "9-8", "label": "Jadefire\nStomp", "row": 8, "col": 7, "max_rank": 1, "req": ["8-7"]},
 
-    # --- Row 10 (Index 9) ---
+    # --- Row 10 (含 2 个 Choice) ---
     {"id": "10-1", "label": "TEB\nFinal", "row": 9, "col": 0, "max_rank": 1, "req": ["9-1"]},
     {"id": "10-2", "label": "Skyfire\nHeel", "row": 9, "col": 1, "max_rank": 1, "req": ["9-3"]},
     {"id": "10-3", "label": "Harmonic\nCombo", "row": 9, "col": 2, "max_rank": 1, "req": ["9-3"]},
     {"id": "10-4", "label": "Flurry of\nXuen", "row": 9, "col": 3, "max_rank": 1, "req": ["9-3", "9-4", "9-5"]},
-    {"id": "10-5", "label": "Martial\nAgility", "row": 9, "col": 4, "max_rank": 1, "req": ["9-5"]},
-    {"id": "10-6", "label": "Airborne\nRhythm", "row": 9, "col": 6, "max_rank": 1, "req": ["9-7"]},
-    {"id": "10-7", "label": "Path of\nJade", "row": 9, "col": 7, "max_rank": 1, "req": ["9-8"]},
+    {"id": "10-5", "label": "Martial\nAgility", "row": 9, "col": 5, "max_rank": 1, "req": ["9-5", "9-6"]},
+
+    # Choice 5: Airborne / Hurricane
+    {"id": "10-6", "label": "Airborne\nRhythm", "row": 9, "col": 6, "max_rank": 1, "req": ["9-7"],
+     "is_choice": True, "choices": ["Airborne\nRhythm", "Hurricane's\nVault"]},
+
+    # Choice 6: Path of Jade / Singularly Focused
+    {"id": "10-7", "label": "Path of\nJade", "row": 9, "col": 7, "max_rank": 1, "req": ["9-8"],
+     "is_choice": True, "choices": ["Path of\nJade", "Singularly\nFocused"]},
 ]
 
 
 class TalentNode:
-    def __init__(self, canvas, data, config, onClick):
+    def __init__(self, canvas, data, onClick):
         self.canvas = canvas
         self.data = data
         self.id = data["id"]
         self.max_rank = data.get("max_rank", 1)
         self.current_rank = 0
         self.reqs = data.get("req", [])
+        self.is_choice = data.get("is_choice", False)
+        self.choices = data.get("choices", [])  # 两个选项的名称
+        self.current_choice_idx = 0  # 0: 第一个, 1: 第二个
         self.onClick = onClick
 
-        # 动态计算坐标: 稍微缩小间距以适应大树
-        # 基础 X=20, 间距=130; Y=20, 间距=90
-        self.x = 20 + data["col"] * 130
-        self.y = 20 + data["row"] * 90
-        self.width = 110
-        self.height = 60
+        self.x = 60 + data["col"] * X_GAP
+        self.y = 60 + data["row"] * Y_GAP
 
-        # 颜色定义
-        self.color_inactive = "#333333"
-        self.color_available = "#555555"
-        self.color_active = "#1b8f61"
-        self.border_available = "#f1c40f"
-        self.border_active = "#2ecc71"
+        self.bg_color = "#2b2b2b"
+        self.active_color = "#3D9970"
+        self.avail_color = "#FF851B"
+        self.border_color = "#555555"
+
+        corner_radius = 15 if self.is_choice else 4
 
         self.btn = ctk.CTkButton(
             master=canvas,
             text=self._get_text(),
-            width=self.width,
-            height=self.height,
-            corner_radius=8,
-            fg_color=self.color_inactive,
+            width=NODE_WIDTH,
+            height=NODE_HEIGHT,
+            corner_radius=corner_radius,
+            fg_color=self.bg_color,
             border_width=2,
-            border_color="#444444",
+            border_color=self.border_color,
             command=self.on_left_click,
-            font=("Arial", 10)
+            font=("Segoe UI", 10, "bold") if self.is_choice else ("Segoe UI", 10)
         )
         self.canvas_window = canvas.create_window(self.x, self.y, window=self.btn, anchor="nw")
         self.btn.bind("<Button-3>", self.on_right_click)
 
     def _get_text(self):
-        return f"{self.data['label']}\n({self.current_rank}/{self.max_rank})"
+        # 如果是 Choice 节点，显示当前选中的名称
+        if self.is_choice and self.choices:
+            label = self.choices[self.current_choice_idx]
+        else:
+            label = self.data['label']
+
+        if self.max_rank > 1:
+            return f"{label}\n{self.current_rank}/{self.max_rank}"
+        return label
 
     def update_visual(self, active, available):
         if active:
-            self.btn.configure(fg_color=self.color_active, border_color=self.border_active)
+            # 激活状态下，Choice 节点使用特殊的蓝色边框区分
+            border_c = "#2ECC40" if not self.is_choice else "#0074D9"
+            self.btn.configure(fg_color=self.active_color, border_color=border_c, text_color="white")
+            if self.max_rank > 1 and self.current_rank < self.max_rank:
+                self.btn.configure(border_color="#FFDC00")
         elif available:
-            self.btn.configure(fg_color=self.color_available, border_color=self.border_available)
+            self.btn.configure(fg_color="#444444", border_color=self.avail_color, text_color="#DDDDDD")
         else:
-            self.btn.configure(fg_color=self.color_inactive, border_color="#444444")
+            self.btn.configure(fg_color="#222222", border_color="#333333", text_color="#555555")
         self.btn.configure(text=self._get_text())
 
     def on_left_click(self):
-        self.onClick(self.id, 1)
+        # 左键逻辑：
+        # 1. 未激活 -> 激活 (Rank 1)
+        # 2. 已激活 (Choice节点) -> 切换选项 (0 -> 1 -> 0)
+        # 3. 已激活 (普通多级节点) -> 增加 Rank (如果没满)
+
+        if self.current_rank == 0:
+            # 激活
+            self.onClick(self.id, 1)
+        else:
+            if self.is_choice:
+                # 切换选项
+                self.current_choice_idx = 1 - self.current_choice_idx
+                self.btn.configure(text=self._get_text())  # 立即刷新文字
+                # 不需要调用 onClick 改变 rank，只是切换状态
+            elif self.current_rank < self.max_rank:
+                # 升级
+                self.onClick(self.id, 1)
 
     def on_right_click(self, event):
+        # 右键逻辑：降级 / 取消激活
         self.onClick(self.id, -1)
 
 
 class TalentTreeWindow(ctk.CTkToplevel):
     def __init__(self, parent, on_close_callback):
         super().__init__(parent)
-        self.title("Monk Class Talent Tree")
-        # 增大窗口尺寸以适应 10 层天赋
-        self.geometry("1100x950")
+        self.title("Monk Talent Tree")
+        self.geometry("1200x900")
         self.on_close_callback = on_close_callback
 
-        # 支持滚动的 Canvas (如果屏幕太小)
-        self.canvas = tk.Canvas(self, bg="#151515", highlightthickness=0, scrollregion=(0,0,1200,1000))
-        
-        # 滚动条
-        vbar = tk.Scrollbar(self, orient=tk.VERTICAL, command=self.canvas.yview)
-        vbar.pack(side=tk.RIGHT, fill=tk.Y)
-        hbar = tk.Scrollbar(self, orient=tk.HORIZONTAL, command=self.canvas.xview)
-        hbar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.canvas.config(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
-        
-        self.canvas.pack(fill="both", expand=True, padx=5, pady=5)
+        self.main_frame = ctk.CTkFrame(self)
+        self.main_frame.pack(fill="both", expand=True)
+
+        v_scroll = ctk.CTkScrollbar(self.main_frame, orientation="vertical")
+        h_scroll = ctk.CTkScrollbar(self.main_frame, orientation="horizontal")
+
+        v_scroll.pack(side="right", fill="y")
+        h_scroll.pack(side="bottom", fill="x")
+
+        self.canvas = tk.Canvas(
+            self.main_frame,
+            bg="#151515",
+            highlightthickness=0,
+            scrollregion=(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT),
+            yscrollcommand=v_scroll.set,
+            xscrollcommand=h_scroll.set
+        )
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        v_scroll.configure(command=self.canvas.yview)
+        h_scroll.configure(command=self.canvas.xview)
+
+        self._bind_mouse_wheel()
 
         self.nodes = {}
         self.selected_talents = set()
 
+        # 初始化 Controls
+        self.control_panel = ctk.CTkFrame(self, height=60, fg_color="#222222")
+        self.control_panel.place(relx=0, rely=1.0, anchor="sw", relwidth=1.0)
+
+        self.info_label = ctk.CTkLabel(self.control_panel, text="Points Spent: 0", font=("Arial", 14, "bold"))
+        self.info_label.pack(side="left", padx=20, pady=10)
+
+        save_btn = ctk.CTkButton(self.control_panel, text="Apply & Close", command=self._on_save, fg_color="#1b8f61",
+                                 width=150)
+        save_btn.pack(side="right", padx=20, pady=10)
+
+        reset_btn = ctk.CTkButton(self.control_panel, text="Reset All", command=self._on_reset, fg_color="#c0392b",
+                                  width=100)
+        reset_btn.pack(side="right", padx=10, pady=10)
+
         self._build_tree()
         self._refresh_state()
 
-        # 悬浮保存按钮 (固定在底部，不随 Canvas 滚动)
-        # 注意：这里简单起见放在 Window 底部，pack 会被 Canvas 挤压，建议用 place 绝对定位或 Frame
-        self.save_btn = ctk.CTkButton(self, text="Apply Build", command=self._on_save, height=40, font=("Arial", 14, "bold"))
-        self.save_btn.place(relx=0.5, rely=0.95, anchor="center")
+    def _bind_mouse_wheel(self):
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
     def _build_tree(self):
-        # 1. 创建节点
         for data in MONK_TALENT_DATA:
-            node = TalentNode(self.canvas, data, {}, self._on_node_click)
-            self.nodes[data["id"]] = node
+            my_col = data["col"]
+            my_row = data["row"]
+            my_x = 60 + my_col * X_GAP + NODE_WIDTH / 2
+            my_y = 60 + my_row * Y_GAP
 
-        # 2. 绘制连线
-        for data in MONK_TALENT_DATA:
-            node = self.nodes[data["id"]]
             for req_id in data.get("req", []):
-                if req_id in self.nodes:
-                    parent = self.nodes[req_id]
-                    x1 = parent.x + parent.width / 2
-                    y1 = parent.y + parent.height
-                    x2 = node.x + node.width / 2
-                    y2 = node.y
-                    self.canvas.create_line(x1, y1, x2, y2, fill="#444444", width=2, tags="conn_line")
+                parent_data = next((item for item in MONK_TALENT_DATA if item["id"] == req_id), None)
+                if parent_data:
+                    p_col = parent_data["col"]
+                    p_row = parent_data["row"]
+                    p_x = 60 + p_col * X_GAP + NODE_WIDTH / 2
+                    p_y = 60 + p_row * Y_GAP + NODE_HEIGHT
+                    self.canvas.create_line(p_x, p_y, my_x, my_y, fill="#444444", width=2, tags="conn_line")
+
+        for data in MONK_TALENT_DATA:
+            node = TalentNode(self.canvas, data, self._on_node_click)
+            self.nodes[data["id"]] = node
 
     def _on_node_click(self, node_id, change):
         node = self.nodes[node_id]
@@ -199,10 +284,7 @@ class TalentTreeWindow(ctk.CTkToplevel):
 
     def _is_node_available(self, node_id):
         reqs = self.nodes[node_id].reqs
-        if not reqs:
-            return True # 根节点
-            
-        # 核心逻辑修改：OR 关系。只要任意一个父节点点满了，就解锁当前节点。
+        if not reqs: return True
         for req_id in reqs:
             parent = self.nodes.get(req_id)
             if parent and parent.current_rank >= parent.max_rank:
@@ -210,38 +292,41 @@ class TalentTreeWindow(ctk.CTkToplevel):
         return False
 
     def _can_unlearn(self, node_id):
-        # 简单判定：如果当前节点是其他已激活节点的前置，则不可取消
-        # (严谨的 WoW 逻辑需要 BFS 检查连通性，这里简化)
         for other_id, other_node in self.nodes.items():
-            if other_node.current_rank > 0:
-                # 检查 other_node 是否依赖 node_id
-                # 依赖判定也需要考虑 OR 逻辑：如果 node_id 是唯一激活的父节点，则不能取消
-                if node_id in other_node.reqs:
-                    # 检查 other_node 是否还有其他已激活的父节点
-                    active_parents = 0
-                    for req in other_node.reqs:
-                        if self.nodes[req].current_rank >= self.nodes[req].max_rank:
-                            active_parents += 1
-                    
-                    if active_parents <= 1:
-                        # 只有当前这个父节点是激活的，如果取消了，子节点就断连了
-                        return False
+            if other_node.current_rank > 0 and node_id in other_node.reqs:
+                active_parents = 0
+                for p_id in other_node.reqs:
+                    if self.nodes[p_id].current_rank >= self.nodes[p_id].max_rank:
+                        active_parents += 1
+                if active_parents <= 1:
+                    return False
         return True
 
     def _refresh_state(self):
+        total_points = 0
         for node_id, node in self.nodes.items():
+            total_points += node.current_rank
             is_active = node.current_rank > 0
             is_avail = self._is_node_available(node_id)
             node.update_visual(is_active, is_avail)
+        self.info_label.configure(text=f"Points Spent: {total_points}")
+
+    def _on_reset(self):
+        for node in self.nodes.values():
+            node.current_rank = 0
+            node.current_choice_idx = 0  # 重置选项
+        self.selected_talents.clear()
+        self._refresh_state()
 
     def _on_save(self):
         final_list = []
         for nid in self.selected_talents:
-            # 返回带 rank 的数据，例如 "id:rank" 或简单的 id 列表(如果是rank 1)
-            # 这里为了兼容旧接口，如果是 max_rank > 1，可能需要特殊处理，
-            # 但旧接口只接受 list of strings。
-            # 我们暂且只返回 ID。如果是多级天赋，引擎端默认视为满级或需要在TalentManager里处理等级。
-            final_list.append(nid)
-        print(f"Build Saved: {final_list}")
+            node = self.nodes[nid]
+            if node.is_choice and node.current_choice_idx == 1:
+                # 如果选了第二个选项，ID 加上 "_b" 后缀
+                final_list.append(nid + "_b")
+            else:
+                final_list.append(nid)
+
         self.on_close_callback(final_list)
         self.destroy()
