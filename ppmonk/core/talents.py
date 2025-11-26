@@ -97,6 +97,18 @@ class TouchOfTheTigerTalent(Talent):
             # +15% 伤害 (multiplier * 1.15)
             spell_book.spells['TP'].damage_multiplier *= 1.15
 
+class DualThreatTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_dual_threat = True
+
+class TeachingsOfTheMonasteryTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_totm = True
+
+class GloryOfTheDawnTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_glory_of_the_dawn = True
+
 class PlaceholderTalent(Talent):
     def apply(self, player, spell_book): pass
 
@@ -113,9 +125,9 @@ TALENT_DB = {
     '3-3': HardenedSolesTalent('Hardened Soles', rank=2), # 假设默认满级
     '3-4': AscensionTalent('Ascension'),
 
-    '4-1': PlaceholderTalent('Dual Threat'),
-    '4-2': PlaceholderTalent('Teachings of the Monastery'),
-    '4-3': PlaceholderTalent('Glory of the Dawn'),
+    '4-1': DualThreatTalent('Dual Threat'),
+    '4-2': TeachingsOfTheMonasteryTalent('Teachings of the Monastery'),
+    '4-3': GloryOfTheDawnTalent('Glory of the Dawn'),
     '5-1': PlaceholderTalent('Crane Vortex'),
     '5-2': PlaceholderTalent('Meridian Strikes'),
     '5-3': PlaceholderTalent('Rising Star'),

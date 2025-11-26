@@ -1,9 +1,12 @@
+import random
+
 class PlayerState:
-    def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500):
+    def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw'):
         self.rating_crit = rating_crit
         self.rating_haste = rating_haste
         self.rating_mastery = rating_mastery
         self.rating_vers = rating_vers
+        self.weapon_type = weapon_type
         
         self.base_mastery = 0.19
         self.base_crit = 0.10
@@ -38,10 +41,19 @@ class PlayerState:
         self.haste = 0.0
         self.mastery = 0.0
 
+        # Talents
+        self.has_dual_threat = False
+        self.has_totm = False
+        self.has_glory_of_the_dawn = False
+        self.totm_stacks = 0
+
         # Base Traits
         self.damage_multiplier = 1.04 * 1.04  # Ferocity of Xuen & Balanced Stratagem
-        self.auto_attack_timer = 0.0
-        self.auto_attack_swing_time = 2.6
+        self.swing_timer = 0.0
+        if self.weapon_type == '2h':
+            self.auto_attack_swing_time = 3.5
+        else: # dw
+            self.auto_attack_swing_time = 2.6
 
         self.update_stats()
 
@@ -86,15 +98,32 @@ class PlayerState:
                     self.update_stats()
 
             # Auto Attack
-            self.auto_attack_timer -= step
-            if self.auto_attack_timer <= 0:
-                auto_attack_crit_chance = self.crit + 0.15  # Way of the Cobra
-                auto_attack_damage = 1.0 * (1.0 + self.versatility) * (1.0 + auto_attack_crit_chance * 1.0)
-                final_damage = auto_attack_damage * self.damage_multiplier
-                if damage_meter is not None:
-                    damage_meter['Auto Attack'] = damage_meter.get('Auto Attack', 0) + final_damage
-                total_damage += final_damage
-                self.auto_attack_timer += self.auto_attack_swing_time / (1 + self.haste)
+            self.swing_timer -= step
+            if self.swing_timer <= 0:
+                ap = 1000 # AP_COEFF
+
+                # Dual Threat (Talent 4-1)
+                if self.has_dual_threat and random.random() < 0.30:
+                    print("[DEBUG] Dual Threat triggered!")
+                    damage = 3.726 * ap
+                    # Nature damage, not physical
+                    final_damage = damage * (1 + self.versatility) * (1 + self.crit * 1.0)
+                    if damage_meter is not None:
+                        damage_meter['Dual Threat'] = damage_meter.get('Dual Threat', 0) + final_damage
+                    total_damage += final_damage
+
+                else: # Normal Auto Attack
+                    if self.weapon_type == '2h':
+                        damage = 2.40 * ap
+                    else: # dw
+                        damage = 1.80 * ap
+
+                    final_damage = damage * (1 + self.versatility) * (1 + self.crit * 1.0)
+                    if damage_meter is not None:
+                        damage_meter['Auto Attack'] = damage_meter.get('Auto Attack', 0) + final_damage
+                    total_damage += final_damage
+
+                self.swing_timer += self.auto_attack_swing_time / (1 + self.haste)
 
             if self.is_channeling:
                 self.channel_time_remaining -= step
