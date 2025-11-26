@@ -47,7 +47,7 @@ class MonkEnv(gym.Env):
         self.timeline.reset()
 
         if self.training_mode and (options is None):
-            self.time = self.rng.uniform(0.0, 18.0)
+            self.time = self.rng.uniform(0.0, 58.0)
             self.player.energy = self.rng.uniform(0.0, self.player.max_energy)
             self.player.chi = self.rng.integers(0, 7)
         else:
@@ -61,12 +61,12 @@ class MonkEnv(gym.Env):
         uptime, mod, _ = self.timeline.get_status(self.time)
         time_to_burst = 0.0
         if self.timeline.burst_start > 0 and self.time < self.timeline.burst_start:
-            time_to_burst = (self.timeline.burst_start - self.time) / 20.0
+            time_to_burst = (self.timeline.burst_start - self.time) / 60.0
 
         norm_energy = self.player.energy / self.player.max_energy
         norm_chi = self.player.chi / 6.0
         norm_gcd = self.player.gcd_remaining / 1.5
-        norm_time = self.time / 20.0
+        norm_time = self.time / 60.0
 
         # [修复] Zenith 现在在 SpellBook 里了，不会报错
         cds_to_track = ['RSK', 'FOF', 'WDP', 'SOTWL', 'SW', 'Zenith']
@@ -91,7 +91,7 @@ class MonkEnv(gym.Env):
         return np.concatenate((obs, self.timeline.global_map), axis=0).astype(np.float32)
 
     def action_masks(self):
-        if self.time >= 20.0: return [False] * 10
+        if self.time >= 60.0: return [False] * 10
         masks = [True] * 10
 
         for i, key in enumerate(self.spell_keys):
@@ -126,40 +126,32 @@ class MonkEnv(gym.Env):
             total_damage += self._advance_time_with_mod(time_to_wait)
 
         lockout = 0.0
+        log_list = []
         if action_idx > 0:
             key = self.action_map[action_idx]
             spell = self.book.spells[key]
             if spell.current_cd > 0.01:
-                return self._get_obs(), -10.0, False, False, {'damage': 0}
-
-            # [核心] 传入 damage_meter 和 other_spells
-            dmg = spell.cast(self.player, other_spells=self.book.spells, damage_meter=self.damage_meter)
-
+                return self._get_obs(), -10.0, False, False, {'damage': 0, 'log': []}
+            dmg, log_list = spell.cast(self.player, other_spells=self.book.spells, damage_meter=self.damage_meter)
             _, current_mod, _ = self.timeline.get_status(self.time)
             scaled_dmg = dmg * current_mod
             total_damage += scaled_dmg
-
-            # 记录主动技能伤害
             self.damage_meter[key] = self.damage_meter.get(key, 0) + scaled_dmg
-
             if spell.is_channeled:
                 lockout = spell.get_effective_cast_time(self.player)
             else:
                 lockout = self.player.gcd_remaining
         else:
             lockout = 0.1
-
         remaining_time = max(0.0, self.timeline.duration - self.time)
         actual_duration = min(lockout, remaining_time)
         if actual_duration > 0:
             total_damage += self._advance_time_with_mod(actual_duration)
-
-        done = self.time >= 20.0
+        done = self.time >= 60.0
         reward = total_damage
-        return self._get_obs(), reward, done, False, {'damage': total_damage}
+        return self._get_obs(), reward, done, False, {'damage': total_damage, 'log': log_list}
 
     def _advance_time_with_mod(self, duration):
-        # 传递 damage_meter 给 player 统计平砍
         total_damage = 0
         _, mod, _ = self.timeline.get_status(self.time)
 

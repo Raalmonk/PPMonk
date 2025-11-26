@@ -78,7 +78,7 @@ def run_simulation(
         batch_size=1024,
     )
 
-    total_steps = 50000
+    total_steps = 1000000
     log(f">>> 开始训练 ({total_steps} steps)...")
 
     callback = TrainingControlCallback(
@@ -128,18 +128,18 @@ def run_simulation(
 
         obs, reward, done, _, info = eval_env.step(action_item)
         dmg = info['damage']
+        log_list = info.get('log', [])
         total_ap += dmg
-
         act_name = eval_env.unwrapped.action_map[action_item]
-
         duration = max(eval_env.unwrapped.time - t_now, 0.0)
-
         if action_item != 0:
-            log(f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
+            log_str = f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}"
+            if log_list:
+                log_str += f"  | {' -> '.join(log_list)}"
+            log(log_str)
             collector.log_cast(t_now, act_name, duration=duration, damage=dmg)
         elif dmg > 0:
             log(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
-
     log(f"{'-' * 30}")
     log(f"Total AP Output: {total_ap:.2f}")
 

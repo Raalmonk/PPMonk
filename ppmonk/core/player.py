@@ -158,7 +158,7 @@ class PlayerState:
                     if self.channel_ticks_remaining > 0:
                         spell = self.current_channel_spell
                         tick_idx = spell.total_ticks - self.channel_ticks_remaining
-                        tick_dmg = spell.calculate_tick_damage(self, tick_idx=tick_idx)
+                        tick_dmg, _ = spell.calculate_tick_damage(self, tick_idx=tick_idx)
                         total_damage += tick_dmg
 
                         # 记录通道伤害
