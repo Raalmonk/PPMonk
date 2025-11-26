@@ -10,9 +10,9 @@ class PlayerState:
 
         self.max_energy = 120.0
         self.energy_regen_mult = 1.0
-        self.energy = 120.0
+        self.energy = 130.0
 
-        self.max_chi = 6
+        self.max_chi = 5
         self.chi = 2
 
         self.xuen_active = False
