@@ -1,6 +1,10 @@
 class Talent:
-    def __init__(self, name): self.name = name
-    def apply(self, player, spell_book): pass
+    """天赋基类"""
+    def __init__(self, name):
+        self.name = name
+
+    def apply(self, player, spell_book):
+        pass
 
 class UnlockSpellTalent(Talent):
     def __init__(self, name, spell_abbr):
@@ -11,34 +15,43 @@ class UnlockSpellTalent(Talent):
             spell_book.spells[self.spell_abbr].is_known = True
 
 class StatModTalent(Talent):
+    """修改基础属性"""
     def __init__(self, name, stat_name, value, is_percentage=False):
         super().__init__(name)
         self.stat_name = stat_name
         self.value = value
         self.is_percentage = is_percentage
+
     def apply(self, player, spell_book):
         if hasattr(player, self.stat_name):
-            base = getattr(player, self.stat_name)
-            if self.is_percentage: setattr(player, self.stat_name, base * (1.0 + self.value))
-            else: setattr(player, self.stat_name, base + self.value)
+            base_val = getattr(player, self.stat_name)
+            if self.is_percentage:
+                setattr(player, self.stat_name, base_val * (1.0 + self.value))
+            else:
+                setattr(player, self.stat_name, base_val + self.value)
 
 class SpellModTalent(Talent):
+    """修改技能属性"""
     def __init__(self, name, spell_abbr, attr_name, value, is_percentage=False):
         super().__init__(name)
         self.spell_abbr = spell_abbr
         self.attr_name = attr_name
         self.value = value
         self.is_percentage = is_percentage
+
     def apply(self, player, spell_book):
         if self.spell_abbr in spell_book.spells:
             spell = spell_book.spells[self.spell_abbr]
             if hasattr(spell, self.attr_name):
-                base = getattr(spell, self.attr_name)
-                if self.is_percentage: setattr(spell, self.attr_name, base * (1.0 + self.value))
-                else: setattr(spell, self.attr_name, base + self.value)
-                if self.attr_name == 'ap_coeff': spell.update_tick_coeff()
+                base_val = getattr(spell, self.attr_name)
+                if self.is_percentage:
+                    setattr(spell, self.attr_name, base_val * (1.0 + self.value))
+                else:
+                    setattr(spell, self.attr_name, base_val + self.value)
+                if self.attr_name == 'ap_coeff':
+                    spell.update_tick_coeff()
 
-# --- 核心天赋实现 ---
+# --- Row 2 & 3 (核心机制天赋) ---
 
 class MomentumBoostTalent(Talent):
     def apply(self, player, spell_book):
@@ -52,86 +65,87 @@ class CombatWisdomTalent(Talent):
         player.combat_wisdom_ready = True
         player.combat_wisdom_timer = 0.0
 
-# [新] Sharp Reflexes: 幻灭踢减CD
 class SharpReflexesTalent(Talent):
     def apply(self, player, spell_book):
         if 'BOK' in spell_book.spells:
-            # 标记 BOK 拥有触发能力
             spell_book.spells['BOK'].triggers_sharp_reflexes = True
 
-# [新] Ferociousness: 暴击加成 (Rank支持在构造函数处理，这里简化为 Rank 1/2 逻辑)
 class FerociousnessTalent(Talent):
-    def __init__(self, name, rank=1):
+    def __init__(self, name, rank=2):
         super().__init__(name)
         self.rank = rank
     def apply(self, player, spell_book):
-        # Rank 1: +2%, Rank 2: +4%
         bonus = 0.02 * self.rank
         player.talent_crit_bonus += bonus
         player.update_stats()
 
-# [新] Hardened Soles: BOK 暴击/爆伤
 class HardenedSolesTalent(Talent):
-    def __init__(self, name, rank=1):
+    def __init__(self, name, rank=2):
         super().__init__(name)
         self.rank = rank
     def apply(self, player, spell_book):
         if 'BOK' in spell_book.spells:
             bok = spell_book.spells['BOK']
-            # Rank 1: +6% Crit, +10% Dmg
-            # Rank 2: +12% Crit, +20% Dmg
             bok.bonus_crit_chance += 0.06 * self.rank
             bok.crit_damage_bonus += 0.10 * self.rank
 
-# [新] Ascension: 能量/真气/回复
 class AscensionTalent(Talent):
     def apply(self, player, spell_book):
         player.max_energy += 20.0
-        player.max_chi += 1 # 变成 7 气
-        player.energy_regen_mult *= 1.10 # +10% regen
+        player.max_chi += 1
+        player.energy_regen_mult *= 1.10
 
-# [新] Touch of the Tiger: TP 增伤
 class TouchOfTheTigerTalent(Talent):
     def apply(self, player, spell_book):
         if 'TP' in spell_book.spells:
-            # +15% 伤害 (multiplier * 1.15)
             spell_book.spells['TP'].damage_multiplier *= 1.15
 
+# --- Row 4 (新实装天赋) ---
+
 class DualThreatTalent(Talent):
+    """4-1: Dual Threat (自动攻击强化)"""
     def apply(self, player, spell_book):
         player.has_dual_threat = True
 
 class TeachingsOfTheMonasteryTalent(Talent):
+    """4-2: Teachings of the Monastery (禅院教诲)"""
     def apply(self, player, spell_book):
         player.has_totm = True
 
 class GloryOfTheDawnTalent(Talent):
+    """4-3: Glory of the Dawn (旭日峥嵘)"""
     def apply(self, player, spell_book):
         player.has_glory_of_the_dawn = True
 
 class PlaceholderTalent(Talent):
     def apply(self, player, spell_book): pass
 
-# --- 数据库 ---
+# --- 完整数据库 ---
 TALENT_DB = {
+    # Row 1
     '1-1': UnlockSpellTalent('Fists of Fury', 'FOF'),
 
+    # Row 2
     '2-1': MomentumBoostTalent('Momentum Boost'),
     '2-2': CombatWisdomTalent('Combat Wisdom'),
     '2-3': SharpReflexesTalent('Sharp Reflexes'),
 
+    # Row 3
     '3-1': TouchOfTheTigerTalent('Touch of the Tiger'),
-    '3-2': FerociousnessTalent('Ferociousness', rank=2), # 假设默认满级，或根据 rank 参数调整
-    '3-3': HardenedSolesTalent('Hardened Soles', rank=2), # 假设默认满级
+    '3-2': FerociousnessTalent('Ferociousness', rank=2),
+    '3-3': HardenedSolesTalent('Hardened Soles', rank=2),
     '3-4': AscensionTalent('Ascension'),
 
+    # Row 4 (已实装)
     '4-1': DualThreatTalent('Dual Threat'),
     '4-2': TeachingsOfTheMonasteryTalent('Teachings of the Monastery'),
     '4-3': GloryOfTheDawnTalent('Glory of the Dawn'),
+
+    # Row 5 - 10 (占位符)
     '5-1': PlaceholderTalent('Crane Vortex'),
     '5-2': PlaceholderTalent('Meridian Strikes'),
     '5-3': PlaceholderTalent('Rising Star'),
-    '5-4': PlaceholderTalent('Zenith'),
+    '5-4': UnlockSpellTalent('Zenith', 'Zenith'),
     '5-5': PlaceholderTalent('Hit Combo'),
     '5-6': PlaceholderTalent('Brawler Intensity'),
     '6-1': PlaceholderTalent('Jade Ignition'),
@@ -153,7 +167,7 @@ TALENT_DB = {
     '8-7': PlaceholderTalent('Memory of Monastery'),
     '9-1': PlaceholderTalent('TEB Buff'),
     '9-2': PlaceholderTalent('Rushing Jade Wind'),
-    '9-3': UnlockSpellTalent('Invoke Xuen', 'Xuen'), # [新] 9-3 解锁雪怒
+    '9-3': UnlockSpellTalent('Invoke Xuen', 'Xuen'),
     '9-4': PlaceholderTalent('Thunderfist'),
     '9-5': PlaceholderTalent('Weapon of Wind'),
     '9-6': PlaceholderTalent('Knowledge'),
@@ -175,7 +189,7 @@ TALENT_DB = {
 }
 
 class TalentManager:
-    def apply_talents(self, talent_names, player, spell_book):
-        for name in talent_names:
-            if name in TALENT_DB:
-                TALENT_DB[name].apply(player, spell_book)
+    def apply_talents(self, talent_ids, player, spell_book):
+        for tid in talent_ids:
+            if tid in TALENT_DB:
+                TALENT_DB[tid].apply(player, spell_book)
