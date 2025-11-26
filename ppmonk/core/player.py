@@ -10,7 +10,7 @@ class PlayerState:
 
         # [新] 武器与攻击强度
         self.weapon_type = weapon_type  # '2h' or 'dw'
-        self.attack_power = 1000.0  # 基础 AP，可根据装备调整
+        self.attack_power = 2000.0  # 基础 AP，可根据装备调整
 
         self.base_mastery = 0.19
         self.base_crit = 0.10
@@ -87,6 +87,7 @@ class PlayerState:
         dt = 0.01
         elapsed = 0.0
         regen_rate = 10.0 * (1.0 + self.haste) * self.energy_regen_mult
+        log_entries = []
 
         while elapsed < duration:
             step = min(dt, duration - elapsed)
@@ -94,63 +95,47 @@ class PlayerState:
 
             if self.gcd_remaining > 0:
                 self.gcd_remaining = max(0, self.gcd_remaining - step)
-
             if not self.combat_wisdom_ready:
                 self.combat_wisdom_timer -= step
                 if self.combat_wisdom_timer <= 0:
                     self.combat_wisdom_ready = True
                     self.combat_wisdom_timer = 0
-
             if self.xuen_active:
                 self.xuen_duration -= step
                 if self.xuen_duration <= 0:
                     self.xuen_active = False
                     self.update_stats()
-
             if self.zenith_active:
                 self.zenith_duration -= step
                 if self.zenith_duration <= 0:
                     self.zenith_active = False
-
-            # --- [新] 自动攻击逻辑 ---
             self.swing_timer -= step
             if self.swing_timer <= 0:
-                # 重置计时器 (受急速缩减)
                 self.swing_timer += self.base_swing_time / (1.0 + self.haste)
-
-                # 判定 Dual Threat (30% 概率)
-                is_dual_threat = False
-                if self.has_dual_threat and random.random() < 0.30:
-                    is_dual_threat = True
-                    print("[DEBUG] Dual Threat Triggered!")
-
+                is_dual_threat = self.has_dual_threat and random.random() < 0.30
                 damage = 0.0
                 if is_dual_threat:
-                    # Dual Threat: 372.6% AP 自然伤害
                     damage = 3.726 * self.attack_power
-                    # 自然伤害享受全能、暴击，不享受护甲减免(模拟器暂未模拟护甲)
-                    # 这里假设享受通用增伤
+                elif self.weapon_type == '2h':
+                    damage = 2.40 * self.attack_power
                 else:
-                    # 普通平砍: 物理伤害
-                    if self.weapon_type == '2h':
-                        damage = 2.40 * self.attack_power
-                    else:  # dw: 主手+副手 (120% + 60% = 180%)
-                        damage = 1.80 * self.attack_power
-
-                # 结算平砍伤害 (含全能/暴击)
-                # 注意：Way of the Cobra (眼镜蛇之道) 可能会加平砍暴击，这里暂用面板暴击
-                is_crit = random.random() < self.crit
-                crit_mult = 2.0 if is_crit else 1.0
-
-                final_dmg = damage * (1.0 + self.versatility) * crit_mult
-
-                total_damage += final_dmg
-
+                    damage = 1.80 * self.attack_power
+                crit_chance = self.crit
+                crit_mult = 2.0
+                dmg_mod = 1.0 + self.versatility
+                expected_dmg = (damage * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
+                total_damage += expected_dmg
+                key = "Dual Threat" if is_dual_threat else "Auto Attack"
                 if damage_meter is not None:
-                    key = "Dual Threat" if is_dual_threat else "Auto Attack"
-                    damage_meter[key] = damage_meter.get(key, 0) + final_dmg
-
-            # --- 通道法术逻辑 ---
+                    damage_meter[key] = damage_meter.get(key, 0) + expected_dmg
+                log_entries.append({
+                    "Action": key,
+                    "Base": damage,
+                    "Dmg Mod": dmg_mod,
+                    "Crit%": crit_chance,
+                    "Crit Mult": crit_mult,
+                    "Expected DMG": expected_dmg
+                })
             if self.is_channeling:
                 self.channel_time_remaining -= step
                 self.time_until_next_tick -= step
@@ -160,18 +145,13 @@ class PlayerState:
                         tick_idx = spell.total_ticks - self.channel_ticks_remaining
                         tick_dmg, _ = spell.calculate_tick_damage(self, tick_idx=tick_idx)
                         total_damage += tick_dmg
-
-                        # 记录通道伤害
                         if damage_meter is not None and spell:
                             damage_meter[spell.abbr] = damage_meter.get(spell.abbr, 0) + tick_dmg
-
                         self.channel_ticks_remaining -= 1
                         self.time_until_next_tick += self.channel_tick_interval
                 if self.channel_time_remaining <= 1e-6 or self.channel_ticks_remaining <= 0:
                     self.is_channeling = False
                     self.current_channel_spell = None
                     self.channel_mastery_snapshot = False
-
             elapsed += step
-
-        return total_damage
+        return total_damage, log_entries
