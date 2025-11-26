@@ -8,8 +8,8 @@ from ppmonk.core.timeline import Timeline
 
 class MonkEnv(gym.Env):
     def __init__(self, seed_offset=0, current_talents=None, player_kwargs=None):
-        # Obs: 16 + 1 + 20 = 37
-        self.observation_space = spaces.Box(low=0, high=1, shape=(37,), dtype=np.float32)
+        # Obs: 18 (base) + 20 (map) = 38
+        self.observation_space = spaces.Box(low=0, high=1, shape=(38,), dtype=np.float32)
         # [修复] Action Space 增加到 10 (0-9), 加入 Zenith
         self.action_space = spaces.Discrete(10)
         self.action_map = {

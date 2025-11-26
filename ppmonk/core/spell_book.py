@@ -58,7 +58,11 @@ class Spell:
 
     def cast(self, player, other_spells=None, damage_meter=None):
         player.energy -= self.energy_cost
-        player.chi = max(0, player.chi - self.chi_cost)
+
+        actual_chi_cost = self.chi_cost
+        if player.zenith_active and self.chi_cost > 0:
+            actual_chi_cost = max(0, self.chi_cost - 1)
+        player.chi = max(0, player.chi - actual_chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen)
         self.current_cd = self.get_effective_cd(player)
 
@@ -69,10 +73,13 @@ class Spell:
 
         # 1. Sharp Reflexes
         if self.triggers_sharp_reflexes and other_spells:
+            sharp_reflexes_bonus = 1.0
+            if self.abbr == 'BOK' and player.zenith_active:
+                sharp_reflexes_bonus += 1.0
             if 'RSK' in other_spells:
-                other_spells['RSK'].current_cd = max(0, other_spells['RSK'].current_cd - 1.0)
+                other_spells['RSK'].current_cd = max(0, other_spells['RSK'].current_cd - sharp_reflexes_bonus)
             if 'FOF' in other_spells:
-                other_spells['FOF'].current_cd = max(0, other_spells['FOF'].current_cd - 1.0)
+                other_spells['FOF'].current_cd = max(0, other_spells['FOF'].current_cd - sharp_reflexes_bonus)
 
         # 2. Teachings of the Monastery
         if self.abbr == 'TP' and player.has_totm:
@@ -109,16 +116,13 @@ class Spell:
                 if damage_meter is not None:
                     damage_meter['Glory of Dawn'] = damage_meter.get('Glory of Dawn', 0) + final_glory
 
-        # 4. Zenith (特质实装)
-        # 效果: 1000% AP 自然伤害 AOE
+        # 4. Zenith
         if self.abbr == 'Zenith':
-            zenith_dmg = 10.0 * player.attack_power
-            # 自然伤害不享受物理易伤(Balanced Stratagem), 但享受 Ferocity of Xuen
-            # 假设基础面板已包含 Ferocity of Xuen
-            final_zenith = zenith_dmg * (1.0 + player.versatility) * (2.0 if random.random() < player.crit else 1.0)
-            extra_damage += final_zenith
-            if damage_meter is not None:
-                damage_meter['Zenith (Blast)'] = damage_meter.get('Zenith (Blast)', 0) + final_zenith
+            player.zenith_active = True
+            player.zenith_duration = 15.0
+            if other_spells and 'RSK' in other_spells:
+                other_spells['RSK'].current_cd = 0
+            player.chi = min(player.max_chi, player.chi + 2)
 
         # 雪怒 & Combat Wisdom
         if self.abbr == 'Xuen':
@@ -225,7 +229,7 @@ class SpellBook:
             # [核心修复] 定义 Zenith
             # 假设 Zenith 是个大招，90秒CD，无需能量但可能需要天赋解锁
             # 这里 req_talent=False 暂时让它可用，或者你需要添加 5-4 天赋解锁
-            'Zenith': Spell('Zenith', 0.0, cd=90.0, req_talent=True)
+            'Zenith': Spell('Zenith', 0.0, cd=90.0, req_talent=False)
         }
         self.spells['TP'].triggers_combat_wisdom = True
         self.active_talents = active_talents if active_talents else []
