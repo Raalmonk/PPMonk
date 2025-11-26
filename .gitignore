@@ -1,2 +1,4 @@
 *.exe
 *.pkg
+__pycache__/
+*.pyc

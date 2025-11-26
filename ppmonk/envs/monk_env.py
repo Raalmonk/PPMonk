@@ -147,7 +147,7 @@ class MonkEnv(gym.Env):
             spell = self.book.spells[key]
             if spell.current_cd > 0.01: 
                 return self._get_obs(), -10.0, False, False, {'damage': 0}
-            dmg = spell.cast(self.player, self.book)
+            dmg = spell.cast(self.player, other_spells=self.book.spells)
             _, current_mod, _ = self.timeline.get_status(self.time)
             total_damage += dmg * current_mod
             if spell.is_channeled:
