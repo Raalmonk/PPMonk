@@ -25,6 +25,8 @@ class PlayerState:
         # 状态追踪
         self.xuen_active = False
         self.xuen_duration = 0.0
+        self.zenith_active = False
+        self.zenith_duration = 0.0
         self.talent_crit_bonus = 0.0
         self.combat_wisdom_ready = False
         self.combat_wisdom_timer = 0.0
@@ -104,6 +106,11 @@ class PlayerState:
                 if self.xuen_duration <= 0:
                     self.xuen_active = False
                     self.update_stats()
+
+            if self.zenith_active:
+                self.zenith_duration -= step
+                if self.zenith_duration <= 0:
+                    self.zenith_active = False
 
             # --- [新] 自动攻击逻辑 ---
             self.swing_timer -= step
