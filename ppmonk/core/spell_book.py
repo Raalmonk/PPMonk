@@ -1,3 +1,4 @@
+import random
 from .talents import TalentManager
 
 class Spell:
@@ -70,12 +71,42 @@ class Spell:
             if 'FOF' in other_spells:
                 other_spells['FOF'].current_cd = max(0, other_spells['FOF'].current_cd - 1.0)
 
+        # Teachings of the Monastery (Talent 4-2)
+        if self.abbr == 'TP' and player.has_totm:
+            player.totm_stacks = min(4, player.totm_stacks + 1)
+
+        extra_damage = 0.0
+        ap = 1000 # AP_COEFF
+
+        if self.abbr == 'BOK' and player.has_totm:
+            if player.totm_stacks > 0:
+                extra_hits = player.totm_stacks
+                damage_per_hit = 0.847 * ap
+                total_extra_damage = extra_hits * damage_per_hit * (1 + player.versatility) * (1 + player.crit * 1.0)
+                extra_damage += total_extra_damage
+                if damage_meter is not None:
+                    damage_meter['TotM'] = damage_meter.get('TotM', 0) + total_extra_damage
+                player.totm_stacks = 0
+
+            if random.random() < 0.12 and 'RSK' in other_spells:
+                print("[DEBUG] Teachings of the Monastery triggered RSK reset!")
+                other_spells['RSK'].current_cd = 0
+
+        # Glory of the Dawn (Talent 4-3)
+        if self.abbr == 'RSK' and player.has_glory_of_the_dawn:
+            if random.random() < player.haste:
+                print("[DEBUG] Glory of the Dawn triggered!")
+                extra_damage_glory = 1.0 * ap * (1 + player.versatility) * (1 + player.crit * 1.0)
+                extra_damage += extra_damage_glory
+                player.chi = min(player.max_chi, player.chi + 1)
+                if damage_meter is not None:
+                    damage_meter['Glory of the Dawn'] = damage_meter.get('Glory of the Dawn', 0) + extra_damage_glory
+
         if self.abbr == 'Xuen':
             player.xuen_active = True
             player.xuen_duration = 24.0
             player.update_stats()
 
-        extra_damage = 0.0
         if self.triggers_combat_wisdom and getattr(player, 'combat_wisdom_ready', False):
             player.combat_wisdom_ready = False
             player.combat_wisdom_timer = 15.0
