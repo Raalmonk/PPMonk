@@ -5,10 +5,11 @@ from .talents import TalentManager
 class Spell:
     def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
                  cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None,
-                 max_charges=1):
+                 max_charges=1, category=''):
         self.abbr = abbr
         self.ap_coeff = ap_coeff
         self.energy_cost = energy
+        self.category = category
         self.chi_cost = chi_cost
         self.chi_gen = chi_gen
         self.base_cd = cd
@@ -156,54 +157,42 @@ class Spell:
             player.channel_mastery_snapshot = triggers_mastery
             return 0.0, []
         else:
-            base_dmg, log_list = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
-            if extra_damage > 0:
-                base_dmg *= 1.30
-                log_list.insert(-1, "CombatWisdom: x1.30")
-                log_list[-1] = f"Final: {base_dmg + extra_damage:.0f}"
-            return base_dmg + extra_damage, log_list
+            base_dmg, log_details = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
+            total_damage = base_dmg + extra_damage
+            if isinstance(log_details, dict):
+                log_details['Expected DMG'] = total_damage
+            return total_damage, log_details
 
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
-        log_list = []
-        base_val = self.tick_coeff * self.damage_multiplier
-        log_list.append(f"Base: {base_val:.0f}")
-        dmg = base_val
+        base_dmg = self.tick_coeff * player.attack_power
+        dmg_mod = 1.0
         if self.abbr == 'RSK':
-            dmg *= 1.70
-            log_list.append("FastFeet: x1.70")
+            dmg_mod *= 1.70
         if self.abbr == 'SCK':
-            dmg *= 1.10
-            log_list.append("FastFeet: x1.10")
-        dmg *= 1.04
-        log_list.append("XuenFerocity: x1.04")
+            dmg_mod *= 1.10
+        dmg_mod *= 1.04
         if self.abbr in ['TP', 'BOK', 'RSK', 'SCK', 'FOF', 'WDP', 'SOTWL']:
-            dmg *= 1.04
-            log_list.append("BalancedStrat: x1.04")
+            dmg_mod *= 1.04
         if self.haste_dmg_scaling:
-            dmg *= (1.0 + player.haste)
-            log_list.append(f"Haste: x{1.0 + player.haste:.2f}")
+            dmg_mod *= (1.0 + player.haste)
         if self.tick_dmg_ramp > 0:
-            ramp_mult = (1.0 + (tick_idx + 1) * self.tick_dmg_ramp)
-            dmg *= ramp_mult
-            log_list.append(f"Ramp: x{ramp_mult:.2f}")
-        apply_mastery = False
-        if mastery_override is not None:
-            apply_mastery = mastery_override
-        elif self.is_channeled:
-            apply_mastery = player.channel_mastery_snapshot
+            dmg_mod *= (1.0 + (tick_idx + 1) * self.tick_dmg_ramp)
+        apply_mastery = mastery_override if mastery_override is not None else (
+            self.is_channeled and player.channel_mastery_snapshot)
         if apply_mastery:
-            dmg *= (1.0 + player.mastery)
-            log_list.append(f"Mastery: x{1.0 + player.mastery:.2f}({player.mastery * 100:.0f}%)")
-        dmg *= (1.0 + player.versatility)
-        log_list.append(f"Vers: x{1.0 + player.versatility:.2f}({player.versatility * 100:.0f}%)")
-        eff_crit = min(1.0, player.crit + self.bonus_crit_chance)
+            dmg_mod *= (1.0 + player.mastery)
+        dmg_mod *= (1.0 + player.versatility)
+        crit_chance = min(1.0, player.crit + self.bonus_crit_chance)
         crit_mult = 2.0 + self.crit_damage_bonus
-        is_crit = random.random() < eff_crit
-        if is_crit:
-            dmg *= crit_mult
-            log_list.append(f"Crit: x{crit_mult:.1f}(Roll)")
-        log_list.append(f"Final: {dmg:.0f}")
-        return dmg, log_list
+        expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
+        log_details = {
+            "Base": base_dmg,
+            "Dmg Mod": dmg_mod,
+            "Crit%": crit_chance,
+            "Crit Mult": crit_mult,
+            "Expected DMG": expected_dmg
+        }
+        return expected_dmg, log_details
 
     def tick_cd(self, dt):
         if self.charges < self.max_charges:
@@ -232,18 +221,19 @@ class SpellBook:
 
         # 基础伤害系数需按实际修改，此处简化
         # 注意：Zenith 在此被定义，彻底解决 KeyError
+        fof_max_ticks = 5
         self.spells = {
-            'TP': Spell('TP', 0.88 * 1000, energy=50, chi_gen=2),
-            'BOK': Spell('BOK', 3.56 * 1000, chi_cost=1),
-            'RSK': Spell('RSK', 4.228 * 1000, chi_cost=2, cd=10.0, cd_haste=True),
-            'SCK': Spell('SCK', 3.52 * 1000, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
-            'FOF': Spell('FOF', 2.07 * 5 * 1000, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5,
-                         cast_time=4.0, cast_haste=True, req_talent=True),
-            'WDP': SpellWDP('WDP', 5.40 * 1000, cd=30.0, req_talent=True),
-            'SOTWL': Spell('SOTWL', 15.12 * 1000, chi_cost=2, cd=30.0, req_talent=True),
-            'SW': Spell('SW', 8.96 * 1000, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4),
-            'Xuen': Spell('Xuen', 0.0, cd=120.0, req_talent=True, gcd_override=0.0),
-            'Zenith': Spell('Zenith', 0.0, cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0)
+            'TP': Spell('TP', 0.88, energy=50, chi_gen=2, category='Minor Filler'),
+            'BOK': Spell('BOK', 3.56, chi_cost=1, category='Minor Filler'),
+            'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True, category='Major Filler'),
+            'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True, category='Minor Filler'),
+            'FOF': Spell('FOF', 2.07 * fof_max_ticks, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True,
+                         ticks=fof_max_ticks, cast_time=4.0, cast_haste=True, req_talent=True, category='Major Filler'),
+            'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True, category='Minor Cooldown'),
+            'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown'),
+            'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown'),
+            'Xuen': Spell('Xuen', 0.0, cd=120.0, req_talent=True, gcd_override=0.0, category='Major Cooldown'),
+            'Zenith': Spell('Zenith', 0.0, cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown')
         }
         self.spells['TP'].triggers_combat_wisdom = True
         self.spells['BOK'].triggers_sharp_reflexes = True

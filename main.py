@@ -111,9 +111,9 @@ def run_simulation(
     log(f"{'=' * 30}")
 
     obs, _ = eval_env.reset(options={'timeline': target_scenario})
-    log(f"{'Time':<6} | {'Action':<8} | {'Chi':<3} | {'Eng':<4} | {'AP%':<6}")
+    log(f"{'Time':<6} | {'Action':<8} | {'Chi':<3} | {'Eng':<4} | {'AP% (Base)':<10} | {'Dmg Mod':<8} | {'Crit%':<6} | {'Crit Mult':<10} | {'Expected DMG':<12}")
 
-    total_ap = 0.0
+    total_damage = 0.0
     done = False
     collector = TimelineDataCollector()
 
@@ -128,20 +128,42 @@ def run_simulation(
 
         obs, reward, done, _, info = eval_env.step(action_item)
         dmg = info['damage']
-        log_list = info.get('log', [])
-        total_ap += dmg
+        log_details = info.get('log_details', {})
+        total_damage += dmg
         act_name = eval_env.unwrapped.action_map[action_item]
         duration = max(eval_env.unwrapped.time - t_now, 0.0)
-        if action_item != 0:
-            log_str = f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}"
-            if log_list:
-                log_str += f"  | {' -> '.join(log_list)}"
+        if action_item != 0 and log_details:
+            log_str = (
+                f"{t_now:<6.1f} | {act_name:<8} | {int(chi):<3} | {int(en):<4} | "
+                f"{log_details['Base']:<10.2f} | {log_details['Dmg Mod']:<8.2f} | "
+                f"{log_details['Crit%']:<6.2f} | {log_details['Crit Mult']:<10.2f} | "
+                f"{log_details['Expected DMG']:<12.2f}"
+            )
             log(log_str)
             collector.log_cast(t_now, act_name, duration=duration, damage=dmg)
         elif dmg > 0:
-            log(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {dmg:<6.2f}")
+            log(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {'-':<10} | {'-':<8} | {'-':<6} | {'-':<10} | {dmg:<12.2f}")
+        auto_attack_logs = info.get('auto_attack_logs', [])
+        for log_entry in auto_attack_logs:
+            log_str = (
+                f"{t_now:<6.1f} | {log_entry['Action']:<8} | {int(chi):<3} | {int(en):<4} | "
+                f"{log_entry['Base']:<10.2f} | {log_entry['Dmg Mod']:<8.2f} | "
+                f"{log_entry['Crit%']:<6.2f} | {log_entry['Crit Mult']:<10.2f} | "
+                f"{log_entry['Expected DMG']:<12.2f}"
+            )
+            log(log_str)
     log(f"{'-' * 30}")
-    log(f"Total AP Output: {total_ap:.2f}")
+    log(f"Total Damage Output: {total_damage:.2f}")
+
+    # Summary Report
+    fight_duration = eval_env.unwrapped.time
+    total_damage_dealt = total_damage
+    dps = total_damage_dealt / fight_duration if fight_duration > 0 else 0
+    log("\n=== Summary Report ===")
+    log(f"Total Fight Duration: {fight_duration:.2f}s")
+    log(f"Total Damage Dealt: {total_damage_dealt:.2f}")
+    log(f"DPS: {dps:.2f}")
+    log("========================")
 
     # Damage Breakdown
     damage_meter = eval_env.unwrapped.damage_meter

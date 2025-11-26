@@ -52,8 +52,8 @@ class MonkEnv(gym.Env):
             self.player.chi = self.rng.integers(0, 7)
         else:
             self.time = 0.0
-            if not self.training_mode:
-                self.player.energy = self.player.max_energy
+            self.player.energy = self.player.max_energy
+            self.player.chi = self.player.max_chi
 
         return self._get_obs(), {}
 
@@ -110,6 +110,8 @@ class MonkEnv(gym.Env):
     def step(self, action_idx):
         total_damage = 0
         time_to_wait = 0.0
+        log_details = {}
+        auto_attack_logs = []
         if self.player.gcd_remaining > 0:
             time_to_wait = max(time_to_wait, self.player.gcd_remaining)
         if action_idx > 0:
@@ -117,22 +119,19 @@ class MonkEnv(gym.Env):
             spell = self.book.spells[key]
             if spell.current_cd > 0:
                 time_to_wait = max(time_to_wait, spell.current_cd)
-
         remaining_time = max(0.0, self.timeline.duration - self.time)
         time_to_wait = min(time_to_wait, remaining_time)
-
-        # [修复] 传入 damage_meter 进行统计
         if time_to_wait > 0:
-            total_damage += self._advance_time_with_mod(time_to_wait)
-
+            dmg, logs = self._advance_time_with_mod(time_to_wait)
+            total_damage += dmg
+            auto_attack_logs.extend(logs)
         lockout = 0.0
-        log_list = []
         if action_idx > 0:
             key = self.action_map[action_idx]
             spell = self.book.spells[key]
             if spell.current_cd > 0.01:
-                return self._get_obs(), -10.0, False, False, {'damage': 0, 'log': []}
-            dmg, log_list = spell.cast(self.player, other_spells=self.book.spells, damage_meter=self.damage_meter)
+                return self._get_obs(), -10.0, False, False, {'damage': 0, 'log_details': {}, 'auto_attack_logs': []}
+            dmg, log_details = spell.cast(self.player, other_spells=self.book.spells, damage_meter=self.damage_meter)
             _, current_mod, _ = self.timeline.get_status(self.time)
             scaled_dmg = dmg * current_mod
             total_damage += scaled_dmg
@@ -146,19 +145,18 @@ class MonkEnv(gym.Env):
         remaining_time = max(0.0, self.timeline.duration - self.time)
         actual_duration = min(lockout, remaining_time)
         if actual_duration > 0:
-            total_damage += self._advance_time_with_mod(actual_duration)
+            dmg, logs = self._advance_time_with_mod(actual_duration)
+            total_damage += dmg
+            auto_attack_logs.extend(logs)
         done = self.time >= 60.0
         reward = total_damage
-        return self._get_obs(), reward, done, False, {'damage': total_damage, 'log': log_list}
+        return self._get_obs(), reward, done, False, {'damage': total_damage, 'log_details': log_details, 'auto_attack_logs': auto_attack_logs}
 
     def _advance_time_with_mod(self, duration):
         total_damage = 0
         _, mod, _ = self.timeline.get_status(self.time)
-
-        # 调用 Player 的 advance_time，传入 meter
-        dmg = self.player.advance_time(duration, damage_meter=self.damage_meter)
-
+        dmg, auto_attack_logs = self.player.advance_time(duration, damage_meter=self.damage_meter)
         self.book.tick(duration)
         total_damage += dmg * mod
         self.time += duration
-        return total_damage
+        return total_damage, auto_attack_logs
