@@ -4,7 +4,8 @@ from .talents import TalentManager
 
 class Spell:
     def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
-                 cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None):
+                 cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None,
+                 max_charges=1):
         self.abbr = abbr
         self.ap_coeff = ap_coeff
         self.energy_cost = energy
@@ -20,10 +21,10 @@ class Spell:
         self.req_talent = req_talent
         self.gcd_override = gcd_override
         self.is_known = not req_talent
+        self.max_charges = max_charges
+        self.charges = self.max_charges
         self.current_cd = 0.0
         self.is_combo_strike = True
-
-        # 机制属性
         self.haste_dmg_scaling = False
         self.tick_dmg_ramp = 0.0
         self.triggers_combat_wisdom = False
@@ -51,21 +52,24 @@ class Spell:
 
     def is_usable(self, player, other_spells=None):
         if not self.is_known: return False
-        if self.current_cd > 0.01: return False
+        if self.charges < 1: return False
         if player.energy < self.energy_cost: return False
-        if player.chi < self.chi_cost: return False
+        cost = self.chi_cost
+        if player.zenith_active and self.chi_cost > 0:
+            cost = max(0, self.chi_cost - 1)
+        if player.chi < cost: return False
         return True
 
     def cast(self, player, other_spells=None, damage_meter=None):
         player.energy -= self.energy_cost
-
         actual_chi_cost = self.chi_cost
         if player.zenith_active and self.chi_cost > 0:
             actual_chi_cost = max(0, self.chi_cost - 1)
         player.chi = max(0, player.chi - actual_chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen)
-        self.current_cd = self.get_effective_cd(player)
-
+        if self.charges == self.max_charges:
+            self.current_cd = self.get_effective_cd(player)
+        self.charges -= 1
         if self.gcd_override is not None:
             player.gcd_remaining = self.gcd_override
         else:
@@ -73,13 +77,13 @@ class Spell:
 
         # 1. Sharp Reflexes
         if self.triggers_sharp_reflexes and other_spells:
-            sharp_reflexes_bonus = 1.0
-            if self.abbr == 'BOK' and player.zenith_active:
-                sharp_reflexes_bonus += 1.0
+            reduction = 1.0
+            if player.zenith_active:
+                reduction += 1.0
             if 'RSK' in other_spells:
-                other_spells['RSK'].current_cd = max(0, other_spells['RSK'].current_cd - sharp_reflexes_bonus)
+                other_spells['RSK'].current_cd = max(0, other_spells['RSK'].current_cd - reduction)
             if 'FOF' in other_spells:
-                other_spells['FOF'].current_cd = max(0, other_spells['FOF'].current_cd - sharp_reflexes_bonus)
+                other_spells['FOF'].current_cd = max(0, other_spells['FOF'].current_cd - reduction)
 
         # 2. Teachings of the Monastery
         if self.abbr == 'TP' and player.has_totm:
@@ -115,16 +119,13 @@ class Spell:
                 player.chi = min(player.max_chi, player.chi + 1)
                 if damage_meter is not None:
                     damage_meter['Glory of Dawn'] = damage_meter.get('Glory of Dawn', 0) + final_glory
-
-        # 4. Zenith
         if self.abbr == 'Zenith':
             player.zenith_active = True
             player.zenith_duration = 15.0
             if other_spells and 'RSK' in other_spells:
                 other_spells['RSK'].current_cd = 0
             player.chi = min(player.max_chi, player.chi + 2)
-
-        # 雪怒 & Combat Wisdom
+        # 4. Xuen
         if self.abbr == 'Xuen':
             player.xuen_active = True
             player.xuen_duration = 24.0
@@ -153,47 +154,64 @@ class Spell:
             player.channel_tick_interval = self.get_tick_interval(player)
             player.time_until_next_tick = player.channel_tick_interval
             player.channel_mastery_snapshot = triggers_mastery
-            return 0.0
+            return 0.0, []
         else:
-            base_dmg = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
-            if extra_damage > 0: base_dmg *= 1.30  # Combat Wisdom 仅增幅 TP
-            return base_dmg + extra_damage
+            base_dmg, log_list = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
+            if extra_damage > 0:
+                base_dmg *= 1.30
+                log_list.insert(-1, "CombatWisdom: x1.30")
+                log_list[-1] = f"Final: {base_dmg + extra_damage:.0f}"
+            return base_dmg + extra_damage, log_list
 
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
-        dmg = self.tick_coeff * self.damage_multiplier
-
-        # [实装] Base Traits 硬编码
-        # Fast Feet: RSK +70%, SCK +10%
-        if self.abbr == 'RSK': dmg *= 1.70
-        if self.abbr == 'SCK': dmg *= 1.10
-
-        # Ferocity of Xuen: 全局 +4%
+        log_list = []
+        base_val = self.tick_coeff * self.damage_multiplier
+        log_list.append(f"Base: {base_val:.0f}")
+        dmg = base_val
+        if self.abbr == 'RSK':
+            dmg *= 1.70
+            log_list.append("FastFeet: x1.70")
+        if self.abbr == 'SCK':
+            dmg *= 1.10
+            log_list.append("FastFeet: x1.10")
         dmg *= 1.04
-
-        # Balanced Stratagem: 物理伤害 +4% (绝大部分技能是物理)
+        log_list.append("XuenFerocity: x1.04")
         if self.abbr in ['TP', 'BOK', 'RSK', 'SCK', 'FOF', 'WDP', 'SOTWL']:
             dmg *= 1.04
-
-        if self.haste_dmg_scaling: dmg *= (1.0 + player.haste)
-        if self.tick_dmg_ramp > 0: dmg *= (1.0 + (tick_idx + 1) * self.tick_dmg_ramp)
-
+            log_list.append("BalancedStrat: x1.04")
+        if self.haste_dmg_scaling:
+            dmg *= (1.0 + player.haste)
+            log_list.append(f"Haste: x{1.0 + player.haste:.2f}")
+        if self.tick_dmg_ramp > 0:
+            ramp_mult = (1.0 + (tick_idx + 1) * self.tick_dmg_ramp)
+            dmg *= ramp_mult
+            log_list.append(f"Ramp: x{ramp_mult:.2f}")
         apply_mastery = False
         if mastery_override is not None:
             apply_mastery = mastery_override
         elif self.is_channeled:
             apply_mastery = player.channel_mastery_snapshot
-
-        if apply_mastery: dmg *= (1.0 + player.mastery)
+        if apply_mastery:
+            dmg *= (1.0 + player.mastery)
+            log_list.append(f"Mastery: x{1.0 + player.mastery:.2f}({player.mastery * 100:.0f}%)")
         dmg *= (1.0 + player.versatility)
-
+        log_list.append(f"Vers: x{1.0 + player.versatility:.2f}({player.versatility * 100:.0f}%)")
         eff_crit = min(1.0, player.crit + self.bonus_crit_chance)
         crit_mult = 2.0 + self.crit_damage_bonus
-        dmg *= (1.0 + eff_crit * (crit_mult - 1.0))
-
-        return dmg
+        is_crit = random.random() < eff_crit
+        if is_crit:
+            dmg *= crit_mult
+            log_list.append(f"Crit: x{crit_mult:.1f}(Roll)")
+        log_list.append(f"Final: {dmg:.0f}")
+        return dmg, log_list
 
     def tick_cd(self, dt):
-        if self.current_cd > 0: self.current_cd = max(0, self.current_cd - dt)
+        if self.charges < self.max_charges:
+            self.current_cd = max(0, self.current_cd - dt)
+            if self.current_cd == 0:
+                self.charges += 1
+                if self.charges < self.max_charges:
+                    self.current_cd = self.base_cd
 
 
 class SpellWDP(Spell):
@@ -225,13 +243,10 @@ class SpellBook:
             'SOTWL': Spell('SOTWL', 15.12 * 1000, chi_cost=2, cd=30.0, req_talent=True),
             'SW': Spell('SW', 8.96 * 1000, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4),
             'Xuen': Spell('Xuen', 0.0, cd=120.0, req_talent=True, gcd_override=0.0),
-
-            # [核心修复] 定义 Zenith
-            # 假设 Zenith 是个大招，90秒CD，无需能量但可能需要天赋解锁
-            # 这里 req_talent=False 暂时让它可用，或者你需要添加 5-4 天赋解锁
-            'Zenith': Spell('Zenith', 0.0, cd=90.0, req_talent=False)
+            'Zenith': Spell('Zenith', 0.0, cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0)
         }
         self.spells['TP'].triggers_combat_wisdom = True
+        self.spells['BOK'].triggers_sharp_reflexes = True
         self.active_talents = active_talents if active_talents else []
         self.talent_manager = TalentManager()
 
