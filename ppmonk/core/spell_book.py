@@ -21,18 +21,15 @@ class Spell:
         self.current_cd = 0.0
         self.is_combo_strike = True
 
-        # --- 机制属性 ---
         self.haste_dmg_scaling = False
         self.tick_dmg_ramp = 0.0
         self.triggers_combat_wisdom = False
 
-        # [新] Sharp Reflexes: 施放该技能是否会减少其他技能CD
         self.triggers_sharp_reflexes = False
 
-        # [新] Hardened Soles / Touch of Tiger 属性
-        self.bonus_crit_chance = 0.0 # 技能独立的额外暴击率 (0.0 ~ 1.0)
-        self.crit_damage_bonus = 0.0 # 技能独立的额外爆伤 (如 0.2 表示 +20%)
-        self.damage_multiplier = 1.0 # 独立增伤倍率 (如 Touch of Tiger = 1.15)
+        self.bonus_crit_chance = 0.0
+        self.crit_damage_bonus = 0.0
+        self.damage_multiplier = 1.0
 
     def update_tick_coeff(self):
         self.tick_coeff = self.ap_coeff / self.total_ticks if self.total_ticks > 0 else self.ap_coeff
@@ -56,10 +53,7 @@ class Spell:
         if player.chi < self.chi_cost: return False
         return True
 
-    def cast(self, player, other_spells=None):
-        # 注意：这里需要传入 other_spells 字典才能做减 CD 逻辑
-        # 如果调用方没传，尝试从外部获取引用 (通常在 env.step 里调用)
-
+    def cast(self, player, other_spells=None, damage_meter=None):
         player.energy -= self.energy_cost
         player.chi = max(0, player.chi - self.chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen)
@@ -70,32 +64,38 @@ class Spell:
         else:
             player.gcd_remaining = 1.0
 
-        # --- [新] Sharp Reflexes 触发逻辑 ---
         if self.triggers_sharp_reflexes and other_spells:
-            # 减少 RSK 和 FOF 的 CD 1秒
             if 'RSK' in other_spells:
                 other_spells['RSK'].current_cd = max(0, other_spells['RSK'].current_cd - 1.0)
             if 'FOF' in other_spells:
                 other_spells['FOF'].current_cd = max(0, other_spells['FOF'].current_cd - 1.0)
-            # print(f"[DEBUG] Sharp Reflexes! Reduced CD of RSK/FOF")
 
-        # --- [新] 雪怒激活逻辑 ---
         if self.abbr == 'Xuen':
             player.xuen_active = True
-            player.xuen_duration = 24.0 # 持续 24 秒
+            player.xuen_duration = 24.0
             player.update_stats()
-            # print(f"[DEBUG] Xuen Activated! Crit increased.")
 
-        # Combat Wisdom 触发
         extra_damage = 0.0
         if self.triggers_combat_wisdom and getattr(player, 'combat_wisdom_ready', False):
             player.combat_wisdom_ready = False
             player.combat_wisdom_timer = 15.0
-            eh_dmg = 1.2 * (1.0 + player.versatility)
-            extra_damage += eh_dmg
+            eh_crit_chance = player.crit + 0.15  # Strength of Spirit
+            eh_dmg = 1.2 * (1.0 + player.versatility) * (1.0 + eh_crit_chance * 1.0)
+            final_eh_dmg = eh_dmg * player.damage_multiplier
+            if damage_meter is not None:
+                damage_meter['Expel Harm'] = damage_meter.get('Expel Harm', 0) + final_eh_dmg
+            extra_damage += final_eh_dmg
 
         triggers_mastery = self.is_combo_strike and (player.last_spell_name is not None) and (player.last_spell_name != self.abbr)
         player.last_spell_name = self.abbr
+
+        # Zenith AOE
+        if self.abbr == 'Zenith':
+            zenith_aoe_damage = 10.0 * (1.0 + player.versatility)
+            final_zenith_aoe_damage = zenith_aoe_damage * player.damage_multiplier
+            if damage_meter is not None:
+                damage_meter['Zenith (AOE)'] = damage_meter.get('Zenith (AOE)', 0) + final_zenith_aoe_damage
+            extra_damage += final_zenith_aoe_damage
 
         if self.is_channeled:
             cast_t = self.get_effective_cast_time(player)
@@ -106,36 +106,27 @@ class Spell:
             player.channel_tick_interval = self.get_tick_interval(player)
             player.time_until_next_tick = player.channel_tick_interval
             player.channel_mastery_snapshot = triggers_mastery
-            return 0.0
+            return extra_damage
         else:
             base_dmg = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
-            if extra_damage > 0: base_dmg *= 1.30
-            return base_dmg + extra_damage
+            final_dmg = base_dmg * player.damage_multiplier
+            if damage_meter is not None:
+                damage_meter[self.abbr] = damage_meter.get(self.abbr, 0) + final_dmg
+            if extra_damage > 0: final_dmg *= 1.30
+            return final_dmg + extra_damage
 
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
-        # 基础伤害 * 独立增伤 (Touch of Tiger)
         dmg = self.tick_coeff * self.damage_multiplier
-
         if self.haste_dmg_scaling: dmg *= (1.0 + player.haste)
         if self.tick_dmg_ramp > 0: dmg *= (1.0 + (tick_idx + 1) * self.tick_dmg_ramp)
-
         apply_mastery = False
         if mastery_override is not None: apply_mastery = mastery_override
         elif self.is_channeled: apply_mastery = player.channel_mastery_snapshot
-
         if apply_mastery: dmg *= (1.0 + player.mastery)
         dmg *= (1.0 + player.versatility)
-
-        # [新] 暴击期望计算 (含 Hardened Soles 爆伤加成)
-        # 实际暴击率 = 面板 + 技能独立加成 (如 Hardened Soles 加 BOK 暴击)
         eff_crit_chance = min(1.0, player.crit + self.bonus_crit_chance)
-
-        # 暴击倍率 = 2.0 (基础) + 爆伤加成
         crit_mult = 2.0 + self.crit_damage_bonus
-
-        # 期望倍数 = 1 + 暴击率 * (倍率 - 1)
         dmg *= (1.0 + eff_crit_chance * (crit_mult - 1.0))
-
         return dmg
 
     def tick_cd(self, dt):
@@ -158,15 +149,14 @@ class SpellBook:
         self.spells = {
             'TP': Spell('TP', 0.88, energy=50, chi_gen=2),
             'BOK': Spell('BOK', 3.56, chi_cost=1),
-            'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True),
-            'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),
+            'RSK': Spell('RSK', 4.228 * 1.7, chi_cost=2, cd=10.0, cd_haste=True),  # Fast Feet
+            'SCK': Spell('SCK', 3.52 * 1.1, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True),  # Fast Feet
             'FOF': Spell('FOF', 2.07 * 5, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True, ticks=5, cast_time=4.0, cast_haste=True, req_talent=True),
             'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True),
             'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True),
             'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4),
-
-            # [新] Xuen 技能定义
-            'Xuen': Spell('Xuen', 0.0, cd=120.0, req_talent=True, gcd_override=0.0) # 不占GCD? 暂时设为0或1
+            'Xuen': Spell('Xuen', 0.0, cd=120.0, req_talent=True, gcd_override=0.0),
+            'Zenith': Spell('Zenith', 0.0, chi_cost=1, cd=15.0, req_talent=True)  # Placeholder for Zenith
         }
         self.spells['TP'].triggers_combat_wisdom = True
         self.active_talents = active_talents if active_talents else []
