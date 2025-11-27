@@ -265,7 +265,7 @@ class PlayerState:
                     if self.xuen_lightning_timer <= 0:
                         self.xuen_lightning_timer += 1.0
                         tl_targets = min(self.target_count, 3)
-                        tl_base = 0.257 * self.attack_power * self.agility
+                        tl_base = 0.257 * self.attack_power
 
                         tl_mod = 1.0 + self.versatility
                         if self.has_universal_energy:
@@ -350,7 +350,7 @@ class PlayerState:
                     self.thunderfist_stacks -= 1
                     self.thunderfist_icd_timer = 1.5
                     thunderfist_proc = True
-                    tf_base = 1.61 * self.attack_power * self.agility
+                    tf_base = 1.61 * self.attack_power
 
                 is_dual_threat = False
                 if self.has_dual_threat:
@@ -383,7 +383,7 @@ class PlayerState:
                 elif is_dual_threat:
                      final_coeff = dual_coeff
 
-                base_dmg = final_coeff * self.attack_power * self.agility
+                base_dmg = final_coeff * self.attack_power
 
                 crit_chance = self.crit
                 crit_mult = 2.0
@@ -464,7 +464,7 @@ class PlayerState:
 
                     if stacks > 0:
                         flurry_coeff = 0.6
-                        flurry_base = flurry_coeff * self.attack_power * self.agility * stacks
+                        flurry_base = flurry_coeff * self.attack_power * stacks
 
                         mitigation = self.get_physical_mitigation()
                         flurry_base *= mitigation
@@ -504,7 +504,7 @@ class PlayerState:
 
                         if self.has_shado_over_battlefield:
                             sob_coeff = 0.52
-                            sob_base = sob_coeff * self.attack_power * self.agility * stacks
+                            sob_base = sob_coeff * self.attack_power * stacks
                             sob_mod = 1.0 + self.versatility
                             if getattr(self, 'has_universal_energy', False):
                                 sob_mod *= 1.15
@@ -536,7 +536,7 @@ class PlayerState:
 
                         if self.has_high_impact:
                             hi_coeff = 1.0
-                            hi_base = hi_coeff * self.attack_power * self.agility * stacks
+                            hi_base = hi_coeff * self.attack_power * stacks
 
                             hi_mod = 1.0 + self.versatility
                             if self.has_restore_balance and self.xuen_active:
@@ -654,7 +654,7 @@ class PlayerState:
                             self.momentum_buff_duration = 8.0
 
                         if getattr(self, 'has_jadefire_stomp', False):
-                            jf_base = 0.4 * self.attack_power * self.agility
+                            jf_base = 0.4 * self.attack_power
 
                             jf_mod = 1.0 + self.versatility
                             if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):

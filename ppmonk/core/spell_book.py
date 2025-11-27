@@ -57,11 +57,13 @@ class Spell:
             base -= 5.0
         # Efficient Training (Zenith CD -10s)
         if self.abbr == 'Zenith' and getattr(player, 'has_stand_ready', False):
-             pass
+             pass # Logic handled elsewhere or Talent applies it? Talent applies it directly to base_cd
 
         # [COTC] Xuen Bond CD reduction
         if self.abbr == 'Xuen' and getattr(player, 'has_xuens_bond', False):
             base -= 30.0
+        if self.abbr == 'Zenith' and getattr(player, 'has_spiritual_focus', False):
+             pass # Handled by Talent applying base_cd change
 
         if self.cd_haste: return base / (1.0 + player.haste)
         return max(0.0, base)
@@ -118,6 +120,9 @@ class Spell:
                 # RWK Proc
                 chance = 0.40
                 if use_expected_value:
+                     # For state logic in EV mode, we might want to be deterministic?
+                     # But for now, we leave RNG for state transitions to simulate variety,
+                     # even if damage calculation is EV.
                     pass
                 else:
                     if random.random() < chance:
@@ -226,13 +231,12 @@ class Spell:
                 player.guaranteed_courage_proc = False
             elif player.has_courage_of_white_tiger:
                  if use_expected_value:
-                     # EV Logic: Don't proc, but add damage
-                     should_proc_courage = False # No state change
+                     should_proc_courage = False
                  else:
                      if random.random() < chance:
                          should_proc_courage = True
 
-            courage_dmg = 3.375 * player.attack_power * player.agility
+            courage_dmg = 3.375 * player.attack_power # Removed extra agility mult
             c_mod = 1.0 + player.versatility
             c_mod *= player.get_physical_mitigation()
             if player.has_restore_balance and player.xuen_active:
@@ -241,7 +245,7 @@ class Spell:
             c_mult = 2.0
 
             if should_proc_courage:
-                c_final = courage_dmg * c_mod * (1 + (c_crit * (c_mult - 1)))
+                c_final = courage_dmg * c_mod * (c_mult if random.random() < c_crit else 1.0)
                 player.record_damage(c_final)
                 if damage_meter is not None:
                      damage_meter['Courage of White Tiger'] = damage_meter.get('Courage of White Tiger', 0) + c_final
@@ -259,7 +263,8 @@ class Spell:
              extra_damage_details.append({
                 'name': 'Courage (EV)',
                 'damage': c_final_ev,
-                'chance': chance
+                'chance': chance,
+                'ev_mode': True
              })
 
         # [Shado-Pan] FOF Consumption of Flurry Charges
@@ -297,7 +302,7 @@ class Spell:
 
         # Jade Ignition
         if self.abbr == 'SCK' and getattr(player, 'has_jade_ignition', False):
-            ji_base = 1.80 * player.attack_power * player.agility
+            ji_base = 1.80 * player.attack_power # Corrected
             ji_mods = 1.0 + player.versatility
             if getattr(player, 'has_hit_combo', False):
                 ji_mods *= (1.0 + player.hit_combo_stacks * 0.01)
@@ -318,7 +323,8 @@ class Spell:
                 extra_damage_details.append({
                     'name': 'Jade Ignition (EV)',
                     'damage': ji_final,
-                    'crit_chance': ji_crit_chance
+                    'crit_chance': ji_crit_chance,
+                    'ev_mode': True
                 })
             else:
                 is_crit_ji = random.random() < ji_crit_chance
@@ -340,7 +346,7 @@ class Spell:
             # Refund 2 TotM
             player.totm_stacks = min(player.max_totm_stacks, player.totm_stacks + 2)
 
-            stomp_base = 2.0 * player.attack_power * player.agility
+            stomp_base = 2.0 * player.attack_power # Corrected
             stomp_mod = 1.0 + player.versatility
             stomp_mod *= player.get_physical_mitigation()
             if player.has_restore_balance and player.xuen_active:
@@ -349,13 +355,13 @@ class Spell:
             s_crit = player.crit
             s_mult = 2.0
 
+            s_scale = self._get_aoe_modifier(player.target_count, 5)
+
             if use_expected_value:
                  stomp_ev = stomp_base * stomp_mod * (1 + (s_crit * (s_mult - 1)))
-                 s_scale = self._get_aoe_modifier(player.target_count, 5)
                  stomp_total = stomp_ev * player.target_count * s_scale
             else:
-                s_scale = self._get_aoe_modifier(player.target_count, 5)
-                stomp_total = stomp_base * stomp_mod * player.target_count * s_scale * (1 + (s_crit * (s_mult - 1)))
+                stomp_total = stomp_base * stomp_mod * player.target_count * s_scale * (s_mult if random.random() < s_crit else 1.0)
 
             extra_damage += stomp_total
             if damage_meter is not None:
@@ -371,7 +377,7 @@ class Spell:
         if self.abbr == 'BOK' and player.has_totm:
             if player.totm_stacks > 0:
                 extra_hits = player.totm_stacks
-                dmg_per_hit = 0.847 * player.attack_power * player.agility
+                dmg_per_hit = 0.847 * player.attack_power # Corrected
 
                 hc_mod = 1.0
                 if getattr(player, 'has_hit_combo', False):
@@ -432,7 +438,7 @@ class Spell:
             elif not use_expected_value and random.random() < chance:
                 should_proc_glory = True
 
-            glory_dmg = 1.0 * player.attack_power * player.agility
+            glory_dmg = 1.0 * player.attack_power # Corrected
             hc_mod = 1.0
             if getattr(player, 'has_hit_combo', False):
                 hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
@@ -467,7 +473,8 @@ class Spell:
                 extra_damage_details.append({
                     'name': 'Glory of the Dawn (EV)',
                     'damage': ev_glory,
-                    'chance': chance
+                    'chance': chance,
+                    'ev_mode': True
                 })
 
         # Zenith
@@ -490,7 +497,7 @@ class Spell:
             player.teb_stacks = 0
             player.teb_active_bonus = consumed_stacks * 0.02
 
-            zenith_burst = 10.0 * player.attack_power * player.agility
+            zenith_burst = 10.0 * player.attack_power # Corrected
             hc_mod = 1.0
             if getattr(player, 'has_hit_combo', False):
                  hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
@@ -536,7 +543,7 @@ class Spell:
             elif not use_expected_value and random.random() < 0.10:
                 should_proc_fox = True
 
-            fox_base = 3.92 * player.attack_power * player.agility
+            fox_base = 3.92 * player.attack_power # Corrected
             fox_mod = 1.0 + player.versatility
             fox_crit_chance = player.crit
             if is_guaranteed: fox_crit_chance = 1.0
@@ -548,28 +555,38 @@ class Spell:
                     fox_dmg_unit *= 1.05
 
             if should_proc_fox:
-                fox_expected = fox_dmg_unit * (1 + (fox_crit_chance * (crit_m - 1)))
-                extra_damage += fox_expected
-                extra_damage_details.append({
-                    'name': 'Flurry of Xuen',
-                    'damage': fox_expected,
-                    'guaranteed': is_guaranteed
-                })
-            elif use_expected_value:
-                 chance = 0.10
+                fox_expected = fox_dmg_unit * (crit_m if is_guaranteed or (not use_expected_value and random.random() < fox_crit_chance) else 1.0)
+                if use_expected_value and not is_guaranteed:
+                    # EV logic for proc that happened?
+                    # If we are here, we decided it happened?
+                    # No, EV logic:
+                    pass
+
+            if use_expected_value:
+                 chance = 1.0 if is_guaranteed else 0.10
                  fox_ev = fox_dmg_unit * (1 + (fox_crit_chance * (crit_m - 1))) * chance
                  extra_damage += fox_ev
                  extra_damage_details.append({
                     'name': 'Flurry of Xuen (EV)',
                     'damage': fox_ev,
-                    'chance': chance
+                    'chance': chance,
+                    'ev_mode': True
+                })
+            elif should_proc_fox:
+                 is_crit = random.random() < fox_crit_chance
+                 fox_dmg = fox_dmg_unit * (crit_m if is_crit else 1.0)
+                 extra_damage += fox_dmg
+                 extra_damage_details.append({
+                    'name': 'Flurry of Xuen',
+                    'damage': fox_dmg,
+                    'guaranteed': is_guaranteed
                 })
 
 
         if self.triggers_combat_wisdom and getattr(player, 'combat_wisdom_ready', False):
             player.combat_wisdom_ready = False
             player.combat_wisdom_timer = 15.0
-            eh_base = 1.2 * player.attack_power * player.agility
+            eh_base = 1.2 * player.attack_power # Corrected
             eh_crit_chance = player.crit + 0.15
             if player.zenith_active:
                 eh_crit_chance += player.teb_active_bonus
@@ -657,7 +674,7 @@ class Spell:
 
     def _calculate_flurry_strikes_damage(self, player, stacks, scale=1.0, use_expected_value=False):
         # Base: 0.6 AP per stack
-        flurry_base = 0.6 * player.attack_power * player.agility * stacks * scale
+        flurry_base = 0.6 * player.attack_power * stacks * scale # Corrected
 
         # Physical Mitigation
         mitigation = player.get_physical_mitigation()
@@ -678,12 +695,13 @@ class Spell:
         if use_expected_value:
              flurry_total = flurry_base * f_mod * (1 + (crit_c * (crit_mult - 1)))
         else:
-             flurry_total = flurry_base * f_mod * (1 + (crit_c * (crit_mult - 1)))
+             is_crit = random.random() < crit_c
+             flurry_total = flurry_base * f_mod * (crit_mult if is_crit else 1.0)
 
         # Shado Over Battlefield (Nature AOE)
         sob_total = 0.0
         if getattr(player, 'has_shado_over_battlefield', False):
-            sob_base = 0.52 * player.attack_power * player.agility * stacks
+            sob_base = 0.52 * player.attack_power * stacks # Corrected
             sob_mod = 1.0 + player.versatility
             if getattr(player, 'has_universal_energy', False):
                 sob_mod *= 1.15
@@ -691,18 +709,28 @@ class Spell:
                 sob_mod *= 1.05
 
             sob_scale = self._get_aoe_modifier(player.target_count, 8)
-            sob_total = sob_base * sob_mod * player.target_count * sob_scale * (1 + (crit_c * (crit_mult - 1)))
+
+            if use_expected_value:
+                 sob_total = sob_base * sob_mod * player.target_count * sob_scale * (1 + (crit_c * (crit_mult - 1)))
+            else:
+                 is_crit = random.random() < crit_c
+                 sob_total = sob_base * sob_mod * player.target_count * sob_scale * (crit_mult if is_crit else 1.0)
 
         # High Impact (Physical AOE)
         hi_total = 0.0
         if getattr(player, 'has_high_impact', False):
-            hi_base = 1.0 * player.attack_power * player.agility * stacks
+            hi_base = 1.0 * player.attack_power * stacks # Corrected
             hi_mod = 1.0 + player.versatility
             if player.has_restore_balance and player.xuen_active:
                 hi_mod *= 1.05
 
             hi_scale = self._get_aoe_modifier(player.target_count, 8)
-            hi_total = hi_base * hi_mod * player.target_count * hi_scale * (1 + (crit_c * (crit_mult - 1)))
+
+            if use_expected_value:
+                 hi_total = hi_base * hi_mod * player.target_count * hi_scale * (1 + (crit_c * (crit_mult - 1)))
+            else:
+                 is_crit = random.random() < crit_c
+                 hi_total = hi_base * hi_mod * player.target_count * hi_scale * (crit_mult if is_crit else 1.0)
 
         return flurry_total, sob_total, hi_total
 
@@ -719,7 +747,8 @@ class Spell:
         if is_rwk:
             current_ap_coeff = 1.7975
 
-        base_dmg_per_target = current_ap_coeff * player.attack_power * player.agility
+        # --- FIX: Removed player.agility multiplication. attack_power is sufficient ---
+        raw_base = current_ap_coeff * player.attack_power
 
         modifiers = []
         crit_sources = []
@@ -853,16 +882,16 @@ class Spell:
         crit_mult = 2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus
 
         # Expected Value
-        expected_dmg_single = (base_dmg_per_target * current_mult) * (1 + (final_crit_chance * (crit_mult - 1)))
+        expected_dmg_single = (raw_base * current_mult) * (1 + (final_crit_chance * (crit_mult - 1)))
 
         # If NOT using Expected Value, roll for crit
+        final_dmg = expected_dmg_single
+        is_crit_hit = False
+
         if not use_expected_value:
-             is_crit = random.random() < final_crit_chance
-             final_mult = crit_mult if is_crit else 1.0
-             dmg_single = (base_dmg_per_target * current_mult) * final_mult
-             # Use the rolled damage
-             expected_dmg_single = dmg_single
-             final_crit_chance = 1.0 if is_crit else 0.0 # For breakdown display if needed
+             is_crit_hit = random.random() < final_crit_chance
+             final_mult = crit_mult if is_crit_hit else 1.0
+             final_dmg = (raw_base * current_mult) * final_mult
 
         # 3. AOE Scaling
         current_aoe_type = self.aoe_type
@@ -875,24 +904,28 @@ class Spell:
         if self.abbr == 'RSK' and getattr(player, 'has_skyfire_heel', False):
              if player.target_count > 1:
                  extra_count = min(player.target_count - 1, 5)
-                 skyfire_cleave = expected_dmg_single * 0.10 * extra_count
+                 skyfire_cleave = final_dmg * 0.10 * extra_count
                  modifiers.append(f"SkyfireCleave: +{int(skyfire_cleave)} ({extra_count} add.)")
 
-        total_expected_dmg = self._apply_aoe_scaling(expected_dmg_single, player, current_aoe_type)
-        total_expected_dmg += skyfire_cleave
+        total_dmg = self._apply_aoe_scaling(final_dmg, player, current_aoe_type)
+        total_dmg += skyfire_cleave
 
         breakdown = {
-            'base': int(base_dmg_per_target),
+            'base': int(raw_base),
+            'coeff': f"{current_ap_coeff:.3f}",
+            'ap': int(player.attack_power),
             'modifiers': modifiers,
             'crit_sources': crit_sources,
             'final_crit': final_crit_chance,
             'crit_mult': crit_mult,
             'aoe_type': current_aoe_type,
             'targets': player.target_count,
-            'total_dmg_after_aoe': total_expected_dmg
+            'total_dmg_after_aoe': total_dmg,
+            'ev_mode': use_expected_value,
+            'is_crit': is_crit_hit
         }
 
-        return total_expected_dmg, breakdown
+        return total_dmg, breakdown
 
     def tick_cd(self, dt, player=None):
         rate = 1.0
@@ -914,7 +947,7 @@ class CelestialConduit(Spell):
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0, use_expected_value=False):
         # 5 * 2.75 * AP
         # Soft Cap 5
-        base = 5.0 * 2.75 * player.attack_power * player.agility
+        base = 5.0 * 2.75 * player.attack_power # Corrected
 
         mult = 1.0 + player.versatility
         if player.has_universal_energy: mult *= 1.15
