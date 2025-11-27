@@ -1,17 +1,14 @@
 import customtkinter as ctk
 import tkinter as tk
 
-# --- UI 配置常量 ---
+# Task 3: Hero Talent Tree Visualization
 CANVAS_WIDTH = 1600
-CANVAS_HEIGHT = 1300
+CANVAS_HEIGHT = 1800 # Increased height for Hero Talents
 NODE_WIDTH = 100
 NODE_HEIGHT = 55
 X_GAP = 150
 Y_GAP = 110
 
-# --- 天赋树数据 (支持 Choice Node) ---
-# 对于 is_choice=True 的节点，增加 choices 列表
-# 保存时：Choice 0 -> id; Choice 1 -> id + "_b"
 MONK_TALENT_DATA = [
     # --- Row 1 ---
     {"id": "1-1", "label": "Fists of Fury", "row": 0, "col": 4, "max_rank": 1, "req": []},
@@ -40,41 +37,30 @@ MONK_TALENT_DATA = [
     {"id": "5-5", "label": "Hit\nCombo", "row": 4, "col": 5, "max_rank": 1, "req": ["4-2", "4-3"]},
     {"id": "5-6", "label": "Brawler's\nIntensity", "row": 4, "col": 7, "max_rank": 1, "req": ["4-3"]},
 
-    # --- Row 6 (含 Choice) ---
+    # --- Row 6 ---
     {"id": "6-1", "label": "Jade\nIgnition", "row": 5, "col": 1, "max_rank": 1, "req": ["5-1"]},
-
-    # Choice 1: Cyclone's Drift / Crashing Fists
     {"id": "6-2", "label": "Cyclone's\nDrift", "row": 5, "col": 2, "max_rank": 1, "req": ["5-1", "5-2", "5-3"],
      "is_choice": True, "choices": ["Cyclone's\nDrift", "Crashing\nFists"]},
-
-    # Choice 2: Drinking Horn Cover / Spiritual Focus
     {"id": "6-3", "label": "Spiritual\nFocus", "row": 5, "col": 3, "max_rank": 1, "req": ["5-4"],
      "is_choice": True, "choices": ["Spiritual\nFocus", "Drinking\nHorn Cover"]},
-
     {"id": "6-4", "label": "Obsidian\nSpiral", "row": 5, "col": 5, "max_rank": 1, "req": ["5-4"]},
     {"id": "6-5", "label": "Combo\nBreaker", "row": 5, "col": 6, "max_rank": 1, "req": ["5-5", "5-6"]},
 
-    # --- Row 7 (含 Choice) ---
+    # --- Row 7 ---
     {"id": "7-1", "label": "Dance of\nChi-Ji", "row": 6, "col": 2, "max_rank": 1, "req": ["6-1", "6-2"]},
     {"id": "7-2", "label": "Shadowboxing\nTreads", "row": 6, "col": 3, "max_rank": 1, "req": ["6-2", "6-3"]},
-
-    # Choice 3: WDP / SOTWL
     {"id": "7-3", "label": "Whirling\nDragon Punch", "row": 6, "col": 4, "max_rank": 1, "req": ["5-4"],
      "is_choice": True, "choices": ["Whirling\nDragon Punch", "Strike of\nWindlord"]},
-
     {"id": "7-4", "label": "Energy\nBurst", "row": 6, "col": 5, "max_rank": 1, "req": ["6-5"]},
     {"id": "7-5", "label": "Inner\nPeace", "row": 6, "col": 7, "max_rank": 1, "req": ["6-5"]},
 
-    # --- Row 8 (含 Choice) ---
+    # --- Row 8 ---
     {"id": "8-1", "label": "Tiger Eye\nBrew", "row": 7, "col": 0, "max_rank": 1, "req": []},
     {"id": "8-2", "label": "Sequenced\nStrikes", "row": 7, "col": 1, "max_rank": 1, "req": ["7-1"]},
     {"id": "8-3", "label": "Sunfire\nSpiral", "row": 7, "col": 2, "max_rank": 1, "req": ["7-2"]},
     {"id": "8-4", "label": "Communion\nw/ Wind", "row": 7, "col": 3, "max_rank": 1, "req": ["7-3"]},
-
-    # Choice 4: Echo / Revolving
     {"id": "8-5", "label": "Echo\nTechnique", "row": 7, "col": 4, "max_rank": 1, "req": ["7-3"],
      "is_choice": True, "choices": ["Echo\nTechnique", "Revolving\nWhirl"]},
-
     {"id": "8-6", "label": "Universal\nEnergy", "row": 7, "col": 5, "max_rank": 1, "req": ["7-3", "7-4"]},
     {"id": "8-7", "label": "Memory of\nMonastery", "row": 7, "col": 6, "max_rank": 1, "req": ["7-4", "7-5"]},
 
@@ -88,22 +74,61 @@ MONK_TALENT_DATA = [
     {"id": "9-7", "label": "Slicing\nWinds", "row": 8, "col": 6, "max_rank": 1, "req": ["8-6", "8-7"]},
     {"id": "9-8", "label": "Jadefire\nStomp", "row": 8, "col": 7, "max_rank": 1, "req": ["8-7"]},
 
-    # --- Row 10 (含 2 个 Choice) ---
+    # --- Row 10 ---
     {"id": "10-1", "label": "TEB\nFinal", "row": 9, "col": 0, "max_rank": 1, "req": ["9-1"]},
     {"id": "10-2", "label": "Skyfire\nHeel", "row": 9, "col": 1, "max_rank": 1, "req": ["9-3"]},
     {"id": "10-3", "label": "Harmonic\nCombo", "row": 9, "col": 2, "max_rank": 1, "req": ["9-3"]},
     {"id": "10-4", "label": "Flurry of\nXuen", "row": 9, "col": 3, "max_rank": 1, "req": ["9-3", "9-4", "9-5"]},
     {"id": "10-5", "label": "Martial\nAgility", "row": 9, "col": 5, "max_rank": 1, "req": ["9-5", "9-6"]},
-
-    # Choice 5: Airborne / Hurricane
     {"id": "10-6", "label": "Airborne\nRhythm", "row": 9, "col": 6, "max_rank": 1, "req": ["9-7"],
      "is_choice": True, "choices": ["Airborne\nRhythm", "Hurricane's\nVault"]},
-
-    # Choice 6: Path of Jade / Singularly Focused
     {"id": "10-7", "label": "Path of\nJade", "row": 9, "col": 7, "max_rank": 1, "req": ["9-8"],
      "is_choice": True, "choices": ["Path of\nJade", "Singularly\nFocused"]},
-]
 
+    # --- Hero Talents ---
+    # Row 12: Headers
+    {"id": "hero-sp-base", "label": "SHADO-PAN", "row": 11, "col": 2, "max_rank": 1, "req": []},
+    {"id": "hero-cotc-base", "label": "CONDUIT OF\nCELESTIALS", "row": 11, "col": 5, "max_rank": 1, "req": []},
+
+    # Row 13 - Shado-Pan
+    {"id": "hero-sp-1", "label": "Pride of\nPandaria", "row": 12, "col": 1, "max_rank": 1, "req": ["hero-sp-base"]},
+    {"id": "hero-sp-2", "label": "High\nImpact", "row": 12, "col": 2, "max_rank": 1, "req": ["hero-sp-base"]},
+    {"id": "hero-sp-3", "label": "Veteran's\nEye", "row": 12, "col": 3, "max_rank": 1, "req": ["hero-sp-base"]},
+
+    # Row 14 - Shado-Pan
+    {"id": "hero-sp-4", "label": "Martial\nPrecision", "row": 13, "col": 1, "max_rank": 1, "req": ["hero-sp-1"]},
+    {"id": "hero-sp-5", "label": "Shado Over\nBattlefield", "row": 13, "col": 2, "max_rank": 1, "req": ["hero-sp-2"]},
+    {"id": "hero-sp-6", "label": "One Vs\nMany", "row": 13, "col": 3, "max_rank": 1, "req": ["hero-sp-3"]},
+
+    # Row 15 - Shado-Pan
+    {"id": "hero-sp-7", "label": "Stand\nReady", "row": 14, "col": 1, "max_rank": 1, "req": ["hero-sp-4"]},
+    {"id": "hero-sp-8", "label": "Against All\nOdds", "row": 14, "col": 2, "max_rank": 1, "req": ["hero-sp-5"]},
+    {"id": "hero-sp-9", "label": "Efficient\nTraining", "row": 14, "col": 3, "max_rank": 1, "req": ["hero-sp-6"]},
+
+    # Row 16 - Shado-Pan
+    {"id": "hero-sp-10", "label": "Vigilant\nWatch", "row": 15, "col": 1, "max_rank": 1, "req": ["hero-sp-7"]},
+    {"id": "hero-sp-11", "label": "Weapons of\nWall", "row": 15, "col": 2, "max_rank": 1, "req": ["hero-sp-8"]},
+    {"id": "hero-sp-12", "label": "Wisdom of\nWall", "row": 15, "col": 3, "max_rank": 1, "req": ["hero-sp-9"]},
+
+    # Row 13 - COTC
+    {"id": "hero-cotc-1", "label": "Celestial\nConduit", "row": 12, "col": 5, "max_rank": 1, "req": ["hero-cotc-base"]},
+    {"id": "hero-cotc-2", "label": "Xuen's\nBond", "row": 12, "col": 6, "max_rank": 1, "req": ["hero-cotc-base"]},
+
+    # Row 14 - COTC
+    {"id": "hero-cotc-3", "label": "Heart of\nJade", "row": 13, "col": 4, "max_rank": 1, "req": ["hero-cotc-1"]},
+    {"id": "hero-cotc-4", "label": "Strength of\nOx", "row": 13, "col": 5, "max_rank": 1, "req": ["hero-cotc-1"]},
+    {"id": "hero-cotc-5", "label": "Inner\nCompass", "row": 13, "col": 6, "max_rank": 1, "req": ["hero-cotc-2"]},
+
+    # Row 15 - COTC
+    {"id": "hero-cotc-6", "label": "Courage of\nTiger", "row": 14, "col": 4, "max_rank": 1, "req": ["hero-cotc-3"]},
+    {"id": "hero-cotc-7", "label": "Xuen's\nGuidance", "row": 14, "col": 5, "max_rank": 1, "req": ["hero-cotc-4"]},
+    {"id": "hero-cotc-8", "label": "Temple\nTraining", "row": 14, "col": 6, "max_rank": 1, "req": ["hero-cotc-5"]},
+
+    # Row 16 - COTC
+    {"id": "hero-cotc-9", "label": "Restore\nBalance", "row": 15, "col": 4, "max_rank": 1, "req": ["hero-cotc-6"]},
+    {"id": "hero-cotc-10", "label": "Path of\nFalling Star", "row": 15, "col": 5, "max_rank": 1, "req": ["hero-cotc-7"]},
+    {"id": "hero-cotc-11", "label": "Unity\nWithin", "row": 15, "col": 6, "max_rank": 1, "req": ["hero-cotc-8"]},
+]
 
 class TalentNode:
     def __init__(self, canvas, data, onClick):
@@ -114,8 +139,8 @@ class TalentNode:
         self.current_rank = 0
         self.reqs = data.get("req", [])
         self.is_choice = data.get("is_choice", False)
-        self.choices = data.get("choices", [])  # 两个选项的名称
-        self.current_choice_idx = 0  # 0: 第一个, 1: 第二个
+        self.choices = data.get("choices", [])
+        self.current_choice_idx = 0
         self.onClick = onClick
 
         self.x = 60 + data["col"] * X_GAP
@@ -125,6 +150,9 @@ class TalentNode:
         self.active_color = "#3D9970"
         self.avail_color = "#FF851B"
         self.border_color = "#555555"
+
+        if "hero-" in self.id and "base" in self.id:
+            self.bg_color = "#4A235A" # Hero Header Color
 
         corner_radius = 15 if self.is_choice else 4
 
@@ -144,7 +172,6 @@ class TalentNode:
         self.btn.bind("<Button-3>", self.on_right_click)
 
     def _get_text(self):
-        # 如果是 Choice 节点，显示当前选中的名称
         if self.is_choice and self.choices:
             label = self.choices[self.current_choice_idx]
         else:
@@ -156,7 +183,6 @@ class TalentNode:
 
     def update_visual(self, active, available):
         if active:
-            # 激活状态下，Choice 节点使用特殊的蓝色边框区分
             border_c = "#2ECC40" if not self.is_choice else "#0074D9"
             self.btn.configure(fg_color=self.active_color, border_color=border_c, text_color="white")
             if self.max_rank > 1 and self.current_rank < self.max_rank:
@@ -168,38 +194,24 @@ class TalentNode:
         self.btn.configure(text=self._get_text())
 
     def on_left_click(self):
-        # 左键逻辑：
-        # 1. 未激活 -> 激活 (Rank 1)
-        # 2. 已激活 (Choice节点) -> 切换选项 (0 -> 1 -> 0)
-        # 3. 已激活 (普通多级节点) -> 增加 Rank (如果没满)
-
         if self.current_rank == 0:
-            # 激活
             self.onClick(self.id, 1)
         else:
             if self.is_choice:
-                # 切换选项
                 self.current_choice_idx = 1 - self.current_choice_idx
-                self.btn.configure(text=self._get_text())  # 立即刷新文字
-                # 重要: 不需要调用 onClick，因为节点本身已经是 active
+                self.btn.configure(text=self._get_text())
             elif self.current_rank < self.max_rank:
-                # 升级
                 self.onClick(self.id, 1)
 
     def on_right_click(self, event):
-        # 右键逻辑：降级 / 取消激活
         self.onClick(self.id, -1)
-
 
 class TalentTreeWindow(ctk.CTkToplevel):
     def __init__(self, parent, on_close_callback):
         super().__init__(parent)
         self.title("Monk Talent Tree")
-        self.geometry("1200x900")
+        self.geometry("1400x950")
         self.on_close_callback = on_close_callback
-
-        # Hero Talent Selection Variable
-        self.hero_talent_var = tk.StringVar(value="Shado-Pan")
 
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.pack(fill="both", expand=True)
@@ -228,46 +240,16 @@ class TalentTreeWindow(ctk.CTkToplevel):
         self.nodes = {}
         self.selected_talents = set()
 
-        # 初始化 Controls
         self.control_panel = ctk.CTkFrame(self, height=60, fg_color="#222222")
         self.control_panel.place(relx=0, rely=1.0, anchor="sw", relwidth=1.0)
 
         self.info_label = ctk.CTkLabel(self.control_panel, text="Points Spent: 0", font=("Arial", 14, "bold"))
         self.info_label.pack(side="left", padx=20, pady=10)
 
-        # Hero Talent Selection UI
-        ctk.CTkLabel(self.control_panel, text="Hero Tree:", font=("Arial", 12, "bold")).pack(side="left", padx=10)
-        ctk.CTkRadioButton(self.control_panel, text="Shado-Pan", variable=self.hero_talent_var, value="Shado-Pan").pack(side="left", padx=5)
-        ctk.CTkRadioButton(self.control_panel, text="Conduit", variable=self.hero_talent_var, value="Conduit").pack(side="left", padx=5)
-
-        # [Task 4] Select All Hero Talents Button (Implicitly handled by saving logic requested?
-        # No, prompt said: "Add a 'Select All Hero Talents' button, OR modify logic: if root is selected, select all."
-        # I will stick to the logic: When saving, we inject ALL relevant hero talents based on the selection.
-        # This seems to be what was requested: "ensure Hero Talent logic usually selects all... please add button or modify logic".
-        # I already have logic in _on_save that injects the list.
-        # But the prompt says "Problem: Hero Talents can only select two? ... Fix."
-        # The previous code hardcoded the list injection in `_on_save`, so effectively it *was* "Select All".
-        # Wait, maybe the user wants to see them visually? The current UI DOES NOT SHOW Hero Talents nodes on the canvas.
-        # The prompt says "Hero Talents only select two?" suggesting maybe there ARE nodes?
-        # Looking at MONK_TALENT_DATA, there are NO hero talent nodes defined in the visual tree.
-        # So the "Hero Talent Selection" is just the Radio Button.
-        # And the previous `_on_save` injected ALL of them.
-        # So where is the problem?
-        # "Problem: Hero Talents ... and binary choice node cannot be selected."
-        # Maybe the user refers to `Choice Node 2-in-1` logic in general?
-        # "Choice Node Fix: Ensure on_left_click on active choice node switches selection." -> Done in `TalentNode.on_left_click`.
-
-        # Regarding Hero Talents: "Hero talent tree is usually Select All... add a button... or logic".
-        # Since I don't have visual nodes for them, I will ensure `_on_save` returns ALL of them, which effectively implements "Select All".
-        # The code I read in `_on_save` already does this: `final_list.extend([...])`.
-        # So I will keep that.
-
-        save_btn = ctk.CTkButton(self.control_panel, text="Apply & Close", command=self._on_save, fg_color="#1b8f61",
-                                 width=150)
+        save_btn = ctk.CTkButton(self.control_panel, text="Apply & Close", command=self._on_save, fg_color="#1b8f61", width=150)
         save_btn.pack(side="right", padx=20, pady=10)
 
-        reset_btn = ctk.CTkButton(self.control_panel, text="Reset All", command=self._on_reset, fg_color="#c0392b",
-                                  width=100)
+        reset_btn = ctk.CTkButton(self.control_panel, text="Reset All", command=self._on_reset, fg_color="#c0392b", width=100)
         reset_btn.pack(side="right", padx=10, pady=10)
 
         self._build_tree()
@@ -276,7 +258,6 @@ class TalentTreeWindow(ctk.CTkToplevel):
     def _bind_mouse_wheel(self):
         def _on_mousewheel(event):
             self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
         self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
     def _build_tree(self):
@@ -305,12 +286,30 @@ class TalentTreeWindow(ctk.CTkToplevel):
             if node.current_rank < node.max_rank and self._is_node_available(node_id):
                 node.current_rank += 1
                 self.selected_talents.add(node_id)
+                # Auto-select children if Header
+                if "hero-" in node_id and "base" in node_id:
+                     self._auto_select_hero_tree(node_id)
         else:
             if node.current_rank > 0 and self._can_unlearn(node_id):
                 node.current_rank -= 1
                 if node.current_rank == 0:
                     self.selected_talents.discard(node_id)
         self._refresh_state()
+
+    def _auto_select_hero_tree(self, header_id):
+        # Find all nodes that depend on this header (directly or indirectly)
+        # Simple BFS
+        queue = [header_id]
+        while queue:
+            current = queue.pop(0)
+            for other_data in MONK_TALENT_DATA:
+                oid = other_data["id"]
+                if current in other_data.get("req", []):
+                     if oid not in self.selected_talents:
+                         node = self.nodes[oid]
+                         node.current_rank = 1
+                         self.selected_talents.add(oid)
+                         queue.append(oid)
 
     def _is_node_available(self, node_id):
         reqs = self.nodes[node_id].reqs
@@ -344,47 +343,52 @@ class TalentTreeWindow(ctk.CTkToplevel):
     def _on_reset(self):
         for node in self.nodes.values():
             node.current_rank = 0
-            node.current_choice_idx = 0  # 重置选项
+            node.current_choice_idx = 0
         self.selected_talents.clear()
         self._refresh_state()
 
     def _on_save(self):
         final_list = []
+
+        # ID Mapping for Hero Talents
+        hero_map = {
+            'hero-sp-base': 'ShadoPanBase',
+            'hero-sp-1': 'PrideOfPandaria',
+            'hero-sp-2': 'HighImpact',
+            'hero-sp-3': 'VeteransEye',
+            'hero-sp-4': 'MartialPrecision',
+            'hero-sp-5': 'ShadoOverTheBattlefield',
+            'hero-sp-6': 'OneVersusMany',
+            'hero-sp-7': 'StandReady',
+            'hero-sp-8': 'AgainstAllOdds',
+            'hero-sp-9': 'EfficientTraining',
+            'hero-sp-10': 'VigilantWatch',
+            'hero-sp-11': 'WeaponsOfTheWall',
+            'hero-sp-12': 'WisdomOfTheWall',
+
+            'hero-cotc-base': 'COTCBase',
+            'hero-cotc-1': 'CelestialConduit',
+            'hero-cotc-2': 'XuensBond',
+            'hero-cotc-3': 'HeartOfJadeSerpent',
+            'hero-cotc-4': 'StrengthOfBlackOx',
+            'hero-cotc-5': 'InnerCompass',
+            'hero-cotc-6': 'CourageOfWhiteTiger',
+            'hero-cotc-7': 'XuensGuidance',
+            'hero-cotc-8': 'TempleTraining',
+            'hero-cotc-9': 'RestoreBalance',
+            'hero-cotc-10': 'PathOfFallingStar',
+            'hero-cotc-11': 'UnityWithin'
+        }
+
         for nid in self.selected_talents:
+            # Check for mapping
+            mapped_id = hero_map.get(nid, nid)
+
             node = self.nodes[nid]
             if node.is_choice and node.current_choice_idx == 1:
-                # [Task 4] Choice Node Logic: Suffix _b
-                final_list.append(nid + "_b")
+                final_list.append(mapped_id + "_b")
             else:
-                final_list.append(nid)
-
-        # [Task 4] Hero Talents Logic
-        # "Select All" logic implementation:
-        # We inject ALL non-choice nodes.
-        # But wait, Shado-Pan and COTC trees might have choice nodes?
-        # The prompt says: "Hero talents usually select all (except 2-choice-1). Please add button or logic... default select all non-choice."
-        # Looking at `talents.py` registration:
-        # Shado-Pan seems linear or fully passive.
-        # I don't see any explicit Choice Nodes defined for Hero Talents in `talents.py` or here.
-        # So I will assume listing all of them is correct for "Select All".
-
-        hero_choice = self.hero_talent_var.get()
-        if hero_choice == "Shado-Pan":
-            # Shado-Pan IDs
-            final_list.extend([
-                'ShadoPanBase', 'PrideOfPandaria', 'HighImpact', 'VeteransEye',
-                'MartialPrecision', 'ShadoOverTheBattlefield', 'OneVersusMany',
-                'StandReady', 'AgainstAllOdds', 'EfficientTraining', 'VigilantWatch',
-                'WeaponsOfTheWall', 'WisdomOfTheWall'
-            ])
-        else:
-             # COTC IDs
-             final_list.extend([
-                'COTCBase', 'CelestialConduit', 'XuensBond', 'HeartOfJadeSerpent',
-                'StrengthOfBlackOx', 'InnerCompass', 'CourageOfWhiteTiger',
-                'XuensGuidance', 'TempleTraining', 'RestoreBalance',
-                'PathOfFallingStar', 'UnityWithin'
-             ])
+                final_list.append(mapped_id)
 
         self.on_close_callback(final_list)
         self.destroy()

@@ -9,7 +9,7 @@ class PlayerState:
         self.agility = agility
 
         self.weapon_type = weapon_type  # '2h' or 'dw'
-        self.attack_power = agility
+        self.attack_power = 1.0  # Base AP Multiplier for transparency
 
         self.max_health = max_health
         self.target_health_pct = 1.0
@@ -265,7 +265,8 @@ class PlayerState:
                     if self.xuen_lightning_timer <= 0:
                         self.xuen_lightning_timer += 1.0
                         tl_targets = min(self.target_count, 3)
-                        tl_base = 0.257 * self.attack_power
+                        # Corrected AP Logic: 0.257 * AP(1.0) * Agility
+                        tl_base = 0.257 * self.attack_power * self.agility
 
                         tl_mod = 1.0 + self.versatility
                         if self.has_universal_energy:
@@ -350,20 +351,12 @@ class PlayerState:
                     self.thunderfist_stacks -= 1
                     self.thunderfist_icd_timer = 1.5
                     thunderfist_proc = True
-                    tf_base = 1.61 * self.attack_power
+                    # Corrected: AP * Agility
+                    tf_base = 1.61 * self.attack_power * self.agility
 
                 is_dual_threat = False
                 if self.has_dual_threat:
                     if use_expected_value:
-                        # Dual threat is 30% chance.
-                        # Do we average the coeff?
-                        # Normal coeff is say 1.8. Dual threat is 3.726.
-                        # If EV mode, maybe use weighted average coeff?
-                        # But Dual Threat changes the NAME of the event too.
-                        # Let's keep it separate or assume no proc but log Expected Extra?
-                        # Or simple: if EV mode, we just assume "Auto Attack" but boosted by expected value of Dual Threat?
-                        # Weighted Average Coeff = (0.7 * Normal) + (0.3 * DualThreat)
-                        # Let's do that for cleanliness in EV mode.
                         pass
                     else:
                         is_dual_threat = random.random() < 0.30
@@ -383,7 +376,8 @@ class PlayerState:
                 elif is_dual_threat:
                      final_coeff = dual_coeff
 
-                base_dmg = final_coeff * self.attack_power
+                # Corrected: AP * Agility
+                base_dmg = final_coeff * self.attack_power * self.agility
 
                 crit_chance = self.crit
                 crit_mult = 2.0
@@ -438,15 +432,6 @@ class PlayerState:
                         proc_chance = (17.14 * 2.6) / 60.0
 
                     if use_expected_value:
-                        # Do we add partial stacks?
-                        # Stacks are discrete.
-                        # Maybe we don't add stacks in EV mode?
-                        # But then we never trigger Flurry.
-                        # This is the "State vs EV" problem.
-                        # For now, let's keep rolling for Stacks even in EV mode,
-                        # because Flurry Charges are a Resource, not just direct damage.
-                        # (Similar to Chi)
-                        # So: Random State, Deterministic Damage.
                         pass
 
                     if random.random() < proc_chance:
@@ -464,7 +449,8 @@ class PlayerState:
 
                     if stacks > 0:
                         flurry_coeff = 0.6
-                        flurry_base = flurry_coeff * self.attack_power * stacks
+                        # Corrected: AP * Agility
+                        flurry_base = flurry_coeff * self.attack_power * self.agility * stacks
 
                         mitigation = self.get_physical_mitigation()
                         flurry_base *= mitigation
@@ -504,7 +490,8 @@ class PlayerState:
 
                         if self.has_shado_over_battlefield:
                             sob_coeff = 0.52
-                            sob_base = sob_coeff * self.attack_power * stacks
+                            # Corrected: AP * Agility
+                            sob_base = sob_coeff * self.attack_power * self.agility * stacks
                             sob_mod = 1.0 + self.versatility
                             if getattr(self, 'has_universal_energy', False):
                                 sob_mod *= 1.15
@@ -536,7 +523,8 @@ class PlayerState:
 
                         if self.has_high_impact:
                             hi_coeff = 1.0
-                            hi_base = hi_coeff * self.attack_power * stacks
+                            # Corrected: AP * Agility
+                            hi_base = hi_coeff * self.attack_power * self.agility * stacks
 
                             hi_mod = 1.0 + self.versatility
                             if self.has_restore_balance and self.xuen_active:
@@ -654,7 +642,8 @@ class PlayerState:
                             self.momentum_buff_duration = 8.0
 
                         if getattr(self, 'has_jadefire_stomp', False):
-                            jf_base = 0.4 * self.attack_power
+                            # Corrected: AP * Agility
+                            jf_base = 0.4 * self.attack_power * self.agility
 
                             jf_mod = 1.0 + self.versatility
                             if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
