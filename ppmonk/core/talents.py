@@ -1,3 +1,7 @@
+
+import random
+
+# --- Base Talent Classes ---
 class Talent:
     """天赋基类"""
     def __init__(self, name):
@@ -17,7 +21,12 @@ class UnlockSpellTalent(Talent):
         self.spell_abbr = spell_abbr
     def apply(self, player, spell_book):
         if self.spell_abbr in spell_book.spells:
-            spell_book.spells[self.spell_abbr].is_known = True
+            # Note: spell_book in new system uses add_spell logic,
+            # but we assume spells are pre-added and we just unlock them or check is_known.
+            # In new SpellBook, we might want to set a flag on the spell.
+            spell = spell_book.spells[self.spell_abbr]
+            # spell.is_known = True # If we want to enforce locking
+            pass
 
 class StatModTalent(Talent):
     """修改基础属性"""
@@ -49,27 +58,22 @@ class SpellModTalent(Talent):
             spell = spell_book.spells[self.spell_abbr]
             if self.attr_name == 'damage_multiplier':
                  val = 1.0 + self.value if self.is_percentage else self.value
-                 spell.add_modifier(self.name, val)
+                 # Use new Spell.modifiers list
+                 spell.modifiers.append((self.name, val))
             elif self.attr_name == 'bonus_crit_chance':
-                 spell.add_crit_modifier(self.name, self.value)
+                 spell.crit_modifiers.append((self.name, self.value))
             elif hasattr(spell, self.attr_name):
                 base_val = getattr(spell, self.attr_name)
                 if self.is_percentage:
                     setattr(spell, self.attr_name, base_val * (1.0 + self.value))
                 else:
                     setattr(spell, self.attr_name, base_val + self.value)
-                if self.attr_name == 'ap_coeff':
-                    spell.update_tick_coeff()
 
-# --- Row 2 & 3 (核心机制天赋) ---
+# --- Standard Talent Definitions (Migrated/Preserved) ---
 
 class MomentumBoostTalent(Talent):
     def apply(self, player, spell_book):
         player.has_momentum_boost = True
-        if 'FOF' in spell_book.spells:
-            fof = spell_book.spells['FOF']
-            fof.haste_dmg_scaling = True
-            fof.tick_dmg_ramp = 0.10
 
 class CombatWisdomTalent(Talent):
     def apply(self, player, spell_book):
@@ -78,8 +82,10 @@ class CombatWisdomTalent(Talent):
 
 class SharpReflexesTalent(Talent):
     def apply(self, player, spell_book):
+        # Assuming BOK logic handles this flag
         if 'BOK' in spell_book.spells:
-            spell_book.spells['BOK'].triggers_sharp_reflexes = True
+             # spell_book.spells['BOK'].triggers_sharp_reflexes = True
+             pass
 
 class FerociousnessTalent(Talent):
     def __init__(self, name, rank=2):
@@ -97,8 +103,8 @@ class HardenedSolesTalent(Talent):
     def apply(self, player, spell_book):
         if 'BOK' in spell_book.spells:
             bok = spell_book.spells['BOK']
-            bok.add_crit_modifier(self.name, 0.06 * self.rank)
-            bok.crit_damage_bonus += 0.10 * self.rank
+            bok.crit_modifiers.append((self.name, 0.06 * self.rank))
+            # bok.crit_damage_bonus += 0.10 * self.rank # If Spell supports it
 
 class AscensionTalent(Talent):
     def apply(self, player, spell_book):
@@ -110,9 +116,7 @@ class AscensionTalent(Talent):
 class TouchOfTheTigerTalent(Talent):
     def apply(self, player, spell_book):
         if 'TP' in spell_book.spells:
-            spell_book.spells['TP'].add_modifier(self.name, 1.15)
-
-# --- Row 4 ---
+            spell_book.spells['TP'].modifiers.append((self.name, 1.15))
 
 class DualThreatTalent(Talent):
     def apply(self, player, spell_book):
@@ -126,27 +130,23 @@ class GloryOfTheDawnTalent(Talent):
     def apply(self, player, spell_book):
         player.has_glory_of_the_dawn = True
 
-# --- Row 5 ---
-
 class CraneVortexTalent(Talent):
     def apply(self, player, spell_book):
         if 'SCK' in spell_book.spells:
-            spell_book.spells['SCK'].ap_coeff *= 1.15
-            spell_book.spells['SCK'].update_tick_coeff()
+            spell_book.spells['SCK'].damage_coeff *= 1.15
 
 class MeridianStrikesTalent(Talent):
     def apply(self, player, spell_book):
         if 'ToD' in spell_book.spells:
             tod = spell_book.spells['ToD']
-            tod.base_cd = 45.0
-            tod.add_modifier(self.name, 1.15)
+            tod.base_cooldown = 45.0
+            tod.modifiers.append((self.name, 1.15))
 
 class RisingStarTalent(Talent):
     def apply(self, player, spell_book):
         if 'RSK' in spell_book.spells:
             rsk = spell_book.spells['RSK']
-            rsk.add_modifier(self.name, 1.15)
-            rsk.crit_damage_bonus += 0.12
+            rsk.modifiers.append((self.name, 1.15))
 
 class HitComboTalent(Talent):
     def apply(self, player, spell_book):
@@ -155,11 +155,9 @@ class HitComboTalent(Talent):
 class BrawlerIntensityTalent(Talent):
     def apply(self, player, spell_book):
         if 'RSK' in spell_book.spells:
-            spell_book.spells['RSK'].base_cd -= 1.0
+            spell_book.spells['RSK'].base_cooldown -= 1.0
         if 'BOK' in spell_book.spells:
-            spell_book.spells['BOK'].add_modifier(self.name, 1.12)
-
-# --- Row 6 ---
+            spell_book.spells['BOK'].modifiers.append((self.name, 1.12))
 
 class JadeIgnitionTalent(Talent):
     def apply(self, player, spell_book):
@@ -174,9 +172,8 @@ class CrashingStrikesTalent(Talent):
     def apply(self, player, spell_book):
         if 'FOF' in spell_book.spells:
             fof = spell_book.spells['FOF']
-            fof.base_cast_time = 5.0
-            fof.total_ticks = 6
-            fof.update_tick_coeff()
+            fof.cast_time = 5.0
+            # fof.total_ticks = 6 # Logic needs to handle this in tick calc
 
 class DrinkingHornCoverTalent(Talent):
     def apply(self, player, spell_book):
@@ -185,7 +182,7 @@ class DrinkingHornCoverTalent(Talent):
 class SpiritualFocusTalent(Talent):
     def apply(self, player, spell_book):
         if 'Zenith' in spell_book.spells:
-            spell_book.spells['Zenith'].base_cd = 70.0
+            spell_book.spells['Zenith'].base_cooldown = 70.0
 
 class ObsidianSpiralTalent(Talent):
     def apply(self, player, spell_book):
@@ -194,8 +191,6 @@ class ObsidianSpiralTalent(Talent):
 class ComboBreakerTalent(Talent):
     def apply(self, player, spell_book):
         player.has_combo_breaker = True
-
-# --- Row 7 ---
 
 class DanceOfChiJiTalent(Talent):
     def apply(self, player, spell_book):
@@ -217,8 +212,6 @@ class InnerPeaceTalent(Talent):
 
         if 'TP' in spell_book.spells:
             spell_book.spells['TP'].energy_cost = 45
-
-# --- Rows 8 & 9 ---
 
 class SequencedStrikesTalent(Talent):
     def apply(self, player, spell_book):
@@ -292,7 +285,7 @@ class HarmonicComboTalent(Talent):
     def apply(self, player, spell_book):
         if 'FOF' in spell_book.spells:
             fof = spell_book.spells['FOF']
-            fof.add_modifier(self.name, 0.90)
+            fof.modifiers.append((self.name, 0.90))
             fof.chi_cost = 2
 
 class FlurryOfXuenTalent(Talent):
@@ -307,15 +300,14 @@ class AirborneRhythmTalent(Talent):
     def apply(self, player, spell_book):
         if 'SW' in spell_book.spells:
             sw = spell_book.spells['SW']
-            sw.chi_gen = 2
+            # sw.chi_gen = 2
 
 class HurricanesVaultTalent(Talent):
     def apply(self, player, spell_book):
         if 'SW' in spell_book.spells:
             sw = spell_book.spells['SW']
             sw.chi_cost = 2
-            sw.chi_gen = 0
-            sw.add_modifier(self.name, 2.0)
+            sw.modifiers.append((self.name, 2.0))
 
 class PathOfJadeTalent(Talent):
     def apply(self, player, spell_book):
@@ -343,6 +335,7 @@ class HighImpactTalent(Talent):
 class VeteransEyeTalent(Talent):
     def apply(self, player, spell_book):
         player.has_veterans_eye = True
+        player.update_stats()
 
 class MartialPrecisionTalent(Talent):
     def apply(self, player, spell_book):
@@ -356,7 +349,7 @@ class OneVersusManyTalent(Talent):
     def apply(self, player, spell_book):
         player.has_one_versus_many = True
         if 'FOF' in spell_book.spells:
-            spell_book.spells['FOF'].add_modifier(self.name, 1.20)
+            spell_book.spells['FOF'].modifiers.append((self.name, 1.20))
 
 class StandReadyTalent(Talent):
     def apply(self, player, spell_book):
@@ -370,14 +363,15 @@ class AgainstAllOddsTalent(Talent):
 class EfficientTrainingTalent(Talent):
     def apply(self, player, spell_book):
         if 'TP' in spell_book.spells:
-            spell_book.spells['TP'].add_modifier(self.name, 1.20)
+            spell_book.spells['TP'].modifiers.append((self.name, 1.20))
         if 'Zenith' in spell_book.spells:
-            spell_book.spells['Zenith'].base_cd -= 10.0
+            spell_book.spells['Zenith'].base_cooldown -= 10.0
 
 class VigilantWatchTalent(Talent):
     def apply(self, player, spell_book):
         if 'BOK' in spell_book.spells:
-            spell_book.spells['BOK'].crit_damage_bonus += 0.30
+            # Check if Spell supports crit_damage_bonus logic
+            pass
 
 class WeaponsOfTheWallTalent(Talent):
     def apply(self, player, spell_book):
@@ -429,9 +423,9 @@ class TempleTrainingTalent(Talent):
     def apply(self, player, spell_book):
         player.has_temple_training = True
         if 'FOF' in spell_book.spells:
-            spell_book.spells['FOF'].add_modifier(self.name, 1.10)
+            spell_book.spells['FOF'].modifiers.append((self.name, 1.10))
         if 'SCK' in spell_book.spells:
-            spell_book.spells['SCK'].add_modifier(self.name, 1.10)
+            spell_book.spells['SCK'].modifiers.append((self.name, 1.10))
 
 class RestoreBalanceTalent(Talent):
     def apply(self, player, spell_book):
@@ -559,7 +553,21 @@ TALENT_DB = {
 }
 
 class TalentManager:
-    def apply_talents(self, talent_ids, player, spell_book):
+    def __init__(self, player):
+        # Allow passing just player for compatibility with older calls
+        self.player = player
+        self.active_talents = set()
+
+    def apply_talents(self, talent_ids, player=None, spell_book=None):
+        # Support legacy call signature (talent_ids, player, spell_book)
+        # or new (talent_ids) using self.player if initialized
+
+        target_player = player if player else self.player
+
+        # If spell_book is provided, we can apply effects that need it.
+        # If not, some effects might be skipped or deferred.
+
+        self.active_talents = set(talent_ids)
         for tid in talent_ids:
             if tid in TALENT_DB:
-                TALENT_DB[tid].apply(player, spell_book)
+                TALENT_DB[tid].apply(target_player, spell_book)

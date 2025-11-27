@@ -1,7 +1,8 @@
+
 import random
 
 class PlayerState:
-    def __init__(self, agility=2000.0, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw', max_health=100000.0, target_count=1):
+    def __init__(self, agility=2000.0, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw', max_health=100000.0, target_count=1, crit=None, haste=None, mastery=None, vers=None):
         self.rating_crit = rating_crit
         self.rating_haste = rating_haste
         self.rating_mastery = rating_mastery
@@ -9,7 +10,7 @@ class PlayerState:
         self.agility = agility
 
         self.weapon_type = weapon_type  # '2h' or 'dw'
-        self.attack_power = agility
+        self.attack_power = agility # Default AP to Agility
 
         self.max_health = max_health
         self.target_health_pct = 1.0
@@ -47,11 +48,15 @@ class PlayerState:
         self.channel_tick_interval = 0.0
         self.channel_mastery_snapshot = False
 
-        # 面板属性
-        self.crit = 0.0
-        self.versatility = 0.0
-        self.haste = 0.0
-        self.mastery = 0.0
+        # 面板属性 (Allows overrides for Sandbox)
+        self.crit_chance = crit if crit is not None else 0.0  # Renamed self.crit -> self.crit_chance for consistency
+        self.versatility = vers if vers is not None else 0.0
+        self.haste = haste if haste is not None else 0.0
+        self.mastery = mastery if mastery is not None else 0.0
+        self._stats_overridden = (crit is not None)
+
+        # Legacy property access
+        self.crit = self.crit_chance # Keep sync
 
         # 天赋开关
         self.has_dual_threat = False
@@ -97,6 +102,9 @@ class PlayerState:
         self.has_weapons_of_the_wall = False
         self.has_wisdom_of_the_wall = False
         self.has_veterans_eye = False
+
+        # Static Modifiers Dictionary for TalentManager
+        self.static_spell_mods = {}
 
         # [COTC] Conduit of the Celestials Flags & State
         self.simulation_time = 0.0
@@ -150,6 +158,17 @@ class PlayerState:
 
         self.update_stats()
 
+    def is_buff_active(self, buff_name):
+        # Generic buff checker for cleaner code
+        attr_name = f"{buff_name.lower()}_active"
+        if hasattr(self, attr_name):
+            return getattr(self, attr_name)
+        return False
+
+    def log_event(self, event_name, damage):
+        # Placeholder for event logging hooks
+        pass
+
     # [COTC] Damage History Methods
     def record_damage(self, amount):
         self.recent_damage_window.append((self.simulation_time, amount))
@@ -171,20 +190,36 @@ class PlayerState:
         return 1.0 - effective_dr
 
     def update_stats(self):
-        raw_crit = (self.rating_crit / 4600.0) + self.base_crit
+        # If stats were overridden in init (e.g. from Sandbox), respect base values?
+        # Typically simulation updates dynamic stats.
+        # We will re-calculate based on rating unless we want to fix them.
+        # For now, let's recalculate but add any manual offsets if we were to support that.
+
+        if not self._stats_overridden:
+            raw_crit = (self.rating_crit / 4600.0) + self.base_crit
+            self.crit_chance = raw_crit
+            self.versatility = (self.rating_vers / 5400.0)
+            raw_haste = (self.rating_haste / 4400.0)
+            self.haste = raw_haste
+            eff_mast_rating = self.rating_mastery
+            # Diminishing returns on mastery
+            dr_threshold = 1380
+            if self.rating_mastery > dr_threshold:
+                excess = self.rating_mastery - dr_threshold
+                eff_mast_rating = dr_threshold + (excess * 0.9)
+            self.mastery = (eff_mast_rating / 2000.0) + self.base_mastery
+
+        # Apply Dynamic Modifiers
         crit_bonus = self.talent_crit_bonus
         if self.xuen_active:
             crit_bonus *= 2.0
-        self.crit = raw_crit + crit_bonus
+        self.crit_chance += crit_bonus
 
-        self.versatility = (self.rating_vers / 5400.0)
-
-        raw_haste = (self.rating_haste / 4400.0)
+        # Keep alias in sync
+        self.crit = self.crit_chance
 
         if self.has_cyclones_drift:
-            self.haste = raw_haste * 1.10
-        else:
-            self.haste = raw_haste
+            self.haste *= 1.10
 
         # Veterans Eye
         if self.has_veterans_eye:
@@ -196,19 +231,14 @@ class PlayerState:
             if self.inner_compass_state == 0:
                 self.haste += 0.02
             elif self.inner_compass_state == 1:
-                self.crit += 0.02
+                self.crit_chance += 0.02
             elif self.inner_compass_state == 2:
                 self.versatility += 0.02
+            elif self.inner_compass_state == 3:
+                self.mastery += 0.02
 
-        dr_threshold = 1380
-        eff_mast_rating = self.rating_mastery
-        if self.rating_mastery > dr_threshold:
-            excess = self.rating_mastery - dr_threshold
-            eff_mast_rating = dr_threshold + (excess * 0.9)
-        self.mastery = (eff_mast_rating / 2000.0) + self.base_mastery
+        self.crit = self.crit_chance
 
-        if self.has_inner_compass and self.inner_compass_state == 3:
-            self.mastery += 0.02
 
     def advance_time(self, duration, damage_meter=None, use_expected_value=False):
         total_damage = 0
@@ -265,7 +295,7 @@ class PlayerState:
                     if self.xuen_lightning_timer <= 0:
                         self.xuen_lightning_timer += 1.0
                         tl_targets = min(self.target_count, 3)
-                        tl_base = 0.257 * self.attack_power * self.agility
+                        tl_base = 0.257 * self.attack_power # Removed Agility multiplier here if AP=Agility
 
                         tl_mod = 1.0 + self.versatility
                         if self.has_universal_energy:
@@ -275,9 +305,9 @@ class PlayerState:
 
                         crit_m = 2.0
                         if use_expected_value:
-                             tl_mod *= (1 + (self.crit * (crit_m - 1)))
+                             tl_mod *= (1 + (self.crit_chance * (crit_m - 1)))
                         else:
-                             if random.random() < self.crit:
+                             if random.random() < self.crit_chance:
                                  tl_mod *= crit_m
 
                         tl_total = tl_base * tl_mod * tl_targets
@@ -350,20 +380,11 @@ class PlayerState:
                     self.thunderfist_stacks -= 1
                     self.thunderfist_icd_timer = 1.5
                     thunderfist_proc = True
-                    tf_base = 1.61 * self.attack_power * self.agility
+                    tf_base = 1.61 * self.attack_power
 
                 is_dual_threat = False
                 if self.has_dual_threat:
                     if use_expected_value:
-                        # Dual threat is 30% chance.
-                        # Do we average the coeff?
-                        # Normal coeff is say 1.8. Dual threat is 3.726.
-                        # If EV mode, maybe use weighted average coeff?
-                        # But Dual Threat changes the NAME of the event too.
-                        # Let's keep it separate or assume no proc but log Expected Extra?
-                        # Or simple: if EV mode, we just assume "Auto Attack" but boosted by expected value of Dual Threat?
-                        # Weighted Average Coeff = (0.7 * Normal) + (0.3 * DualThreat)
-                        # Let's do that for cleanliness in EV mode.
                         pass
                     else:
                         is_dual_threat = random.random() < 0.30
@@ -383,9 +404,9 @@ class PlayerState:
                 elif is_dual_threat:
                      final_coeff = dual_coeff
 
-                base_dmg = final_coeff * self.attack_power * self.agility
+                base_dmg = final_coeff * self.attack_power
 
-                crit_chance = self.crit
+                crit_chance = self.crit_chance
                 crit_mult = 2.0
                 dmg_mod = 1.0 + self.versatility
 
@@ -415,7 +436,7 @@ class PlayerState:
                 breakdown = {
                     'base': int(base_dmg),
                     'modifiers': ['Versatility: x%.2f' % (1.0 + self.versatility)],
-                    'crit_sources': ['Base: %.1f%%' % (self.crit*100)],
+                    'crit_sources': ['Base: %.1f%%' % (self.crit_chance*100)],
                     'final_crit': crit_chance,
                     'crit_mult': crit_mult
                 }
@@ -438,15 +459,8 @@ class PlayerState:
                         proc_chance = (17.14 * 2.6) / 60.0
 
                     if use_expected_value:
-                        # Do we add partial stacks?
-                        # Stacks are discrete.
-                        # Maybe we don't add stacks in EV mode?
-                        # But then we never trigger Flurry.
-                        # This is the "State vs EV" problem.
-                        # For now, let's keep rolling for Stacks even in EV mode,
-                        # because Flurry Charges are a Resource, not just direct damage.
-                        # (Similar to Chi)
-                        # So: Random State, Deterministic Damage.
+                        # In EV mode, we might want to probabilistically add stacks
+                        # but for simulation stability we just use random.
                         pass
 
                     if random.random() < proc_chance:
@@ -464,7 +478,7 @@ class PlayerState:
 
                     if stacks > 0:
                         flurry_coeff = 0.6
-                        flurry_base = flurry_coeff * self.attack_power * self.agility * stacks
+                        flurry_base = flurry_coeff * self.attack_power * stacks
 
                         mitigation = self.get_physical_mitigation()
                         flurry_base *= mitigation
@@ -475,7 +489,7 @@ class PlayerState:
                             f_mod *= 1.05
                         f_mod *= 0.7
 
-                        flurry_crit = self.crit
+                        flurry_crit = self.crit_chance
                         if self.has_pride_of_pandaria:
                             flurry_crit += 0.15
 
@@ -504,7 +518,7 @@ class PlayerState:
 
                         if self.has_shado_over_battlefield:
                             sob_coeff = 0.52
-                            sob_base = sob_coeff * self.attack_power * self.agility * stacks
+                            sob_base = sob_coeff * self.attack_power * stacks
                             sob_mod = 1.0 + self.versatility
                             if getattr(self, 'has_universal_energy', False):
                                 sob_mod *= 1.15
@@ -536,7 +550,7 @@ class PlayerState:
 
                         if self.has_high_impact:
                             hi_coeff = 1.0
-                            hi_base = hi_coeff * self.attack_power * self.agility * stacks
+                            hi_base = hi_coeff * self.attack_power * stacks
 
                             hi_mod = 1.0 + self.versatility
                             if self.has_restore_balance and self.xuen_active:
@@ -571,7 +585,7 @@ class PlayerState:
                     if getattr(self, 'has_universal_energy', False):
                         tf_mod *= 1.15
 
-                    tf_crit = self.crit
+                    tf_crit = self.crit_chance
 
                     if use_expected_value:
                         tf_expected = (tf_base * tf_mod) * (1 + (tf_crit * (crit_mult - 1)))
@@ -589,7 +603,7 @@ class PlayerState:
                     tf_breakdown = {
                         'base': int(tf_base),
                         'modifiers': ['Versatility: x%.2f' % (1.0 + self.versatility)],
-                        'crit_sources': ['Base: %.1f%%' % (self.crit*100)],
+                        'crit_sources': ['Base: %.1f%%' % (self.crit_chance*100)],
                         'final_crit': tf_crit,
                         'crit_mult': crit_mult
                     }
@@ -654,7 +668,7 @@ class PlayerState:
                             self.momentum_buff_duration = 8.0
 
                         if getattr(self, 'has_jadefire_stomp', False):
-                            jf_base = 0.4 * self.attack_power * self.agility
+                            jf_base = 0.4 * self.attack_power
 
                             jf_mod = 1.0 + self.versatility
                             if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
@@ -679,9 +693,9 @@ class PlayerState:
                                 scale = (5.0 / eff_target_count) ** 0.5
 
                             if use_expected_value:
-                                jf_total = jf_base * jf_mod * eff_target_count * scale * (1 + (self.crit * (crit_mult - 1)))
+                                jf_total = jf_base * jf_mod * eff_target_count * scale * (1 + (self.crit_chance * (crit_mult - 1)))
                             else:
-                                jf_total = jf_base * jf_mod * eff_target_count * scale * (1 + (self.crit * (crit_mult - 1)))
+                                jf_total = jf_base * jf_mod * eff_target_count * scale * (1 + (self.crit_chance * (crit_mult - 1)))
 
                             total_damage += jf_total
                             self.record_damage(jf_total)
