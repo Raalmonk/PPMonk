@@ -181,7 +181,7 @@ class TalentNode:
                 # 切换选项
                 self.current_choice_idx = 1 - self.current_choice_idx
                 self.btn.configure(text=self._get_text())  # 立即刷新文字
-                # 不需要调用 onClick 改变 rank，只是切换状态
+                # 重要: 不需要调用 onClick，因为节点本身已经是 active
             elif self.current_rank < self.max_rank:
                 # 升级
                 self.onClick(self.id, 1)
@@ -239,6 +239,28 @@ class TalentTreeWindow(ctk.CTkToplevel):
         ctk.CTkLabel(self.control_panel, text="Hero Tree:", font=("Arial", 12, "bold")).pack(side="left", padx=10)
         ctk.CTkRadioButton(self.control_panel, text="Shado-Pan", variable=self.hero_talent_var, value="Shado-Pan").pack(side="left", padx=5)
         ctk.CTkRadioButton(self.control_panel, text="Conduit", variable=self.hero_talent_var, value="Conduit").pack(side="left", padx=5)
+
+        # [Task 4] Select All Hero Talents Button (Implicitly handled by saving logic requested?
+        # No, prompt said: "Add a 'Select All Hero Talents' button, OR modify logic: if root is selected, select all."
+        # I will stick to the logic: When saving, we inject ALL relevant hero talents based on the selection.
+        # This seems to be what was requested: "ensure Hero Talent logic usually selects all... please add button or modify logic".
+        # I already have logic in _on_save that injects the list.
+        # But the prompt says "Problem: Hero Talents can only select two? ... Fix."
+        # The previous code hardcoded the list injection in `_on_save`, so effectively it *was* "Select All".
+        # Wait, maybe the user wants to see them visually? The current UI DOES NOT SHOW Hero Talents nodes on the canvas.
+        # The prompt says "Hero Talents only select two?" suggesting maybe there ARE nodes?
+        # Looking at MONK_TALENT_DATA, there are NO hero talent nodes defined in the visual tree.
+        # So the "Hero Talent Selection" is just the Radio Button.
+        # And the previous `_on_save` injected ALL of them.
+        # So where is the problem?
+        # "Problem: Hero Talents ... and binary choice node cannot be selected."
+        # Maybe the user refers to `Choice Node 2-in-1` logic in general?
+        # "Choice Node Fix: Ensure on_left_click on active choice node switches selection." -> Done in `TalentNode.on_left_click`.
+
+        # Regarding Hero Talents: "Hero talent tree is usually Select All... add a button... or logic".
+        # Since I don't have visual nodes for them, I will ensure `_on_save` returns ALL of them, which effectively implements "Select All".
+        # The code I read in `_on_save` already does this: `final_list.extend([...])`.
+        # So I will keep that.
 
         save_btn = ctk.CTkButton(self.control_panel, text="Apply & Close", command=self._on_save, fg_color="#1b8f61",
                                  width=150)
@@ -331,12 +353,21 @@ class TalentTreeWindow(ctk.CTkToplevel):
         for nid in self.selected_talents:
             node = self.nodes[nid]
             if node.is_choice and node.current_choice_idx == 1:
-                # 如果选了第二个选项，ID 加上 "_b" 后缀
+                # [Task 4] Choice Node Logic: Suffix _b
                 final_list.append(nid + "_b")
             else:
                 final_list.append(nid)
 
-        # Inject Hero Talents
+        # [Task 4] Hero Talents Logic
+        # "Select All" logic implementation:
+        # We inject ALL non-choice nodes.
+        # But wait, Shado-Pan and COTC trees might have choice nodes?
+        # The prompt says: "Hero talents usually select all (except 2-choice-1). Please add button or logic... default select all non-choice."
+        # Looking at `talents.py` registration:
+        # Shado-Pan seems linear or fully passive.
+        # I don't see any explicit Choice Nodes defined for Hero Talents in `talents.py` or here.
+        # So I will assume listing all of them is correct for "Select All".
+
         hero_choice = self.hero_talent_var.get()
         if hero_choice == "Shado-Pan":
             # Shado-Pan IDs

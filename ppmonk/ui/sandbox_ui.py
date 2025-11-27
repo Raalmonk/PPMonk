@@ -6,12 +6,13 @@ from ppmonk.core.spell_book import SpellBook
 import math
 
 class SandboxWindow(ctk.CTkToplevel):
-    def __init__(self, parent, active_talents=None):
+    def __init__(self, parent, active_talents=None, player_stats=None):
         super().__init__(parent)
         self.title("Manual Sandbox")
         self.geometry("1400x850")
 
         self.active_talents = active_talents if active_talents else []
+        self.player_stats = player_stats if player_stats else {}
 
         self.player = None
         self.spell_book = None
@@ -50,7 +51,7 @@ class SandboxWindow(ctk.CTkToplevel):
         # Agility
         ctk.CTkLabel(top_panel, text="Agility:").pack(side="left", padx=5)
         self.agility_entry = ctk.CTkEntry(top_panel, width=80)
-        self.agility_entry.insert(0, "2000")
+        self.agility_entry.insert(0, str(self.player_stats.get('agility', 2000)))
         self.agility_entry.pack(side="left", padx=5)
 
         # Target HP
@@ -178,7 +179,16 @@ class SandboxWindow(ctk.CTkToplevel):
             self.agility_entry.delete(0, "end")
             self.agility_entry.insert(0, "2000")
 
-        self.player = PlayerState(agility=agility, target_count=self.target_count.get())
+        # Initialize Player with inherited stats if available
+        # Note: PlayerState defaults might differ from Main UI, so passing them is crucial.
+        self.player = PlayerState(
+            agility=agility,
+            target_count=self.target_count.get(),
+            rating_crit=self.player_stats.get('crit_rating', 2000),
+            rating_haste=self.player_stats.get('haste_rating', 1500),
+            rating_mastery=self.player_stats.get('mastery_rating', 1000),
+            rating_vers=self.player_stats.get('vers_rating', 500)
+        )
         self.player.target_health_pct = self.target_hp_pct.get()
 
         # Update default talents
@@ -258,8 +268,6 @@ class SandboxWindow(ctk.CTkToplevel):
     def _update_button_visual(self, btn):
         key = btn.spell_key
         # Handle "debug" buttons which might have fake keys?
-        # Actually I will assign spell_key only to main buttons.
-        # But if I iterate children, I need to check.
         if key not in self.spell_book.spells: return
 
         spell = self.spell_book.spells[key]
@@ -359,7 +367,7 @@ class SandboxWindow(ctk.CTkToplevel):
                     duration=0.15,
                     text=extra['name'][:4],
                     color="#D4AC0D",
-                    info={"Damage": extra['damage'], "Breakdown": extra}
+                    info={"Damage": extra.get('damage', 0), "Breakdown": extra}
                  )
 
         self._advance_simulation(step_duration)
@@ -432,29 +440,30 @@ class SandboxWindow(ctk.CTkToplevel):
     def _show_tooltip(self, event, name, info):
         top = ctk.CTkToplevel(self)
         top.title(f"Details: {name}")
-        top.geometry("400x350")
+        # Adaptive Size
+        top.geometry("450x400")
 
         dmg_val = int(info['Damage'])
         ctk.CTkLabel(top, text=f"Action: {name}", font=("Arial", 16, "bold")).pack(pady=10)
         ctk.CTkLabel(top, text=f"Damage: {dmg_val}", font=("Arial", 14, "bold"), text_color="#E67E22").pack(pady=5)
 
-        breakdown = info['Breakdown']
+        breakdown = info.get('Breakdown')
         text_info = ""
 
         if isinstance(breakdown, dict):
             text_info += f"Base: {breakdown.get('base')}\n"
+            if 'coeff' in breakdown:
+                 text_info += f"Coeff: {breakdown.get('coeff')} * AP: {breakdown.get('ap')}\n"
 
-            # New Modifier List Display
             text_info += "Modifiers:\n"
             mods = breakdown.get('modifiers', [])
             if isinstance(mods, list):
                 for m in mods:
                     text_info += f"  - {m}\n"
-            elif isinstance(mods, dict): # Fallback
+            elif isinstance(mods, dict):
                 for k, v in mods.items():
                     text_info += f"  - {k}: x{v:.2f}\n"
 
-            # Crit Sources
             crit_src = breakdown.get('crit_sources', [])
             if crit_src:
                 text_info += "\nCrit Sources:\n"
@@ -464,10 +473,10 @@ class SandboxWindow(ctk.CTkToplevel):
             text_info += f"\nFinal Crit: {breakdown.get('final_crit', 0)*100:.1f}%\n"
             text_info += f"Crit Mult: {breakdown.get('crit_mult', 2.0):.2f}x\n"
 
+            # [Task 2] Log formatting for EV / Snapshot
             if 'ev_mode' in breakdown:
-                 text_info += f"EV Mode: {breakdown['ev_mode']}\n"
-                 if breakdown.get('chance'):
-                     text_info += f"Proc Chance: {breakdown['chance']*100:.1f}%\n"
+                 mode_str = "Expected Value" if breakdown['ev_mode'] else "Snapshot (Roll)"
+                 text_info += f"Mode: {mode_str}\n"
 
             if 'aoe_type' in breakdown:
                  text_info += f"\nAOE Type: {breakdown['aoe_type']}\n"
@@ -482,11 +491,11 @@ class SandboxWindow(ctk.CTkToplevel):
             if 'extra_events' in breakdown:
                 text_info += "\nExtra Events:\n"
                 for extra in breakdown['extra_events']:
-                    text_info += f"  - {extra['name']}: {int(extra['damage'])} (EV Mode: {extra.get('ev_mode', False)})\n"
+                    text_info += f"  - {extra['name']}: {int(extra.get('damage',0))}\n"
         else:
             text_info = str(breakdown)
 
-        textbox = ctk.CTkTextbox(top, width=380, height=220)
+        textbox = ctk.CTkTextbox(top, width=420, height=250)
         textbox.pack(pady=10)
         textbox.insert("1.0", text_info)
         textbox.configure(state="disabled")
