@@ -60,12 +60,21 @@ class Spell:
              # Handled in Talent Apply but double check if logic is here
              pass
 
+        # [COTC] Xuen Bond CD reduction
+        if self.abbr == 'Xuen' and getattr(player, 'has_xuens_bond', False):
+            base -= 30.0 # Placeholder value for "CD Reduced"
+
         if self.cd_haste: return base / (1.0 + player.haste)
         return max(0.0, base)
 
     def get_effective_cast_time(self, player):
-        if self.cast_haste: return self.base_cast_time / (1.0 + player.haste)
-        return self.base_cast_time
+        base = self.base_cast_time
+        # [COTC] Jade Serpent CDR -> FOF 50% duration
+        if self.abbr == 'FOF' and player.jade_serpent_cdr_active:
+            base *= 0.5
+
+        if self.cast_haste: return base / (1.0 + player.haste)
+        return base
 
     def get_tick_interval(self, player):
         if not self.is_channeled or self.total_ticks <= 0: return 0
@@ -88,6 +97,9 @@ class Spell:
 
         if player.zenith_active and self.chi_cost > 0:
             cost = max(0, cost - 1)
+
+        # [COTC] Harmonic Combo: FOF cost reduced
+        # Actually handled in talent apply (modifying self.chi_cost).
 
         if player.chi < cost: return False
         return True
@@ -179,6 +191,12 @@ class Spell:
             if getattr(player, 'has_thunderfist', False):
                  player.thunderfist_stacks += (4 + player.target_count)
 
+            # [COTC] Heart of the Jade Serpent
+            if player.has_heart_of_jade_serpent:
+                player.jade_serpent_cdr_active = True
+                player.jade_serpent_cdr_duration = 8.0
+                player.cooldown_recovery_rate = 1.75
+
         # 1. Sharp Reflexes
         if self.triggers_sharp_reflexes and other_spells:
             reduction = 1.0
@@ -193,6 +211,41 @@ class Spell:
         if self.abbr == 'TP' and player.has_totm:
             player.totm_stacks = min(player.max_totm_stacks, player.totm_stacks + 1)
 
+            # [COTC] Courage of the White Tiger (Trigger Check)
+            should_proc_courage = False
+            if player.guaranteed_courage_proc:
+                should_proc_courage = True
+                player.guaranteed_courage_proc = False
+            elif player.has_courage_of_white_tiger:
+                 # 4 PPM
+                 ppm = 4.0
+                 chance = ppm * (player.base_swing_time / 60.0)
+                 if random.random() < chance:
+                     should_proc_courage = True
+
+            if should_proc_courage:
+                courage_dmg = 3.375 * player.attack_power * player.agility
+                # Physical. Use calc helper if possible?
+                # Calculating manually
+                c_mod = 1.0 + player.versatility
+                c_mod *= player.get_physical_mitigation()
+                if player.has_restore_balance and player.xuen_active:
+                     c_mod *= 1.05
+
+                c_crit = player.crit
+                c_mult = 2.0
+                c_final = courage_dmg * c_mod * (1 + (c_crit * (c_mult - 1)))
+
+                player.record_damage(c_final) # [COTC]
+                if damage_meter is not None:
+                     damage_meter['Courage of White Tiger'] = damage_meter.get('Courage of White Tiger', 0) + c_final
+
+                # Trigger Compass
+                player.advance_inner_compass()
+                # Active Black Ox
+                player.niuzao_ready = True
+
+
         extra_damage = 0.0
         extra_damage_details = []
 
@@ -200,14 +253,7 @@ class Spell:
         if self.abbr == 'FOF' and player.flurry_charges > 0:
             consumed = player.flurry_charges
             player.flurry_charges = 0
-
-            # Trigger Flurry Strikes Logic for each stack?
-            # "Consume all charges... Trigger Flurry Strikes damage per stack"
-            # We treat this as a single large event or multiple.
-            # Lets treat as 1 big event for logs.
-
             flurry_total, sob_total, hi_total = self._calculate_flurry_strikes_damage(player, consumed, scale=1.0)
-
             extra_damage += flurry_total + sob_total + hi_total
 
             if damage_meter is not None:
@@ -246,6 +292,8 @@ class Spell:
                 ji_mods *= 1.15
             if player.zenith_active and getattr(player, 'has_weapon_of_wind', False):
                 ji_mods *= 1.10
+            if player.has_restore_balance and player.xuen_active:
+                ji_mods *= 1.05
 
             is_crit_ji = random.random() < (player.crit + (player.teb_active_bonus if player.zenith_active else 0.0))
             if is_crit_ji:
@@ -261,6 +309,36 @@ class Spell:
                 'name': 'Jade Ignition',
                 'damage': ji_final,
                 'crit': is_crit_ji
+            })
+
+        # [COTC] Strength of the Black Ox
+        if self.abbr == 'BOK' and player.niuzao_ready:
+            player.niuzao_ready = False
+            # Refund 2 TotM
+            player.totm_stacks = min(player.max_totm_stacks, player.totm_stacks + 2)
+
+            # Stomp: 2.0 AP AOE
+            stomp_base = 2.0 * player.attack_power * player.agility
+            stomp_mod = 1.0 + player.versatility
+            stomp_mod *= player.get_physical_mitigation() # Is it physical? "Niuzao Stomp". Usually Physical.
+            if player.has_restore_balance and player.xuen_active:
+                stomp_mod *= 1.05
+
+            s_crit = player.crit
+            s_mult = 2.0
+
+            # Soft Cap (Default AOE cap)
+            s_scale = self._get_aoe_modifier(player.target_count, 5)
+
+            stomp_total = stomp_base * stomp_mod * player.target_count * s_scale * (1 + (s_crit * (s_mult - 1)))
+            extra_damage += stomp_total
+            if damage_meter is not None:
+                damage_meter['Niuzao Stomp'] = damage_meter.get('Niuzao Stomp', 0) + stomp_total
+
+            player.advance_inner_compass()
+            extra_damage_details.append({
+                'name': 'Niuzao Stomp',
+                'damage': stomp_total
             })
 
         # TotM Consumption
@@ -279,6 +357,10 @@ class Spell:
                 ww_mod = 1.10 if (player.zenith_active and getattr(player, 'has_weapon_of_wind', False)) else 1.0
 
                 total_extra = extra_hits * dmg_per_hit * (1 + player.versatility) * crit_m * hc_mod * ww_mod
+
+                if player.has_restore_balance and player.xuen_active:
+                    total_extra *= 1.05
+
                 extra_damage += total_extra
 
                 if damage_meter is not None:
@@ -291,7 +373,15 @@ class Spell:
                     'crit': is_crit
                 })
 
-                player.totm_stacks = 0
+                # [COTC] Xuen's Guidance: Chance to refund 1
+                refunded = False
+                if player.has_xuens_guidance:
+                     if random.random() < 0.15:
+                         player.totm_stacks = 1
+                         refunded = True
+
+                if not refunded:
+                    player.totm_stacks = 0
 
             should_reset = False
             if force_proc_reset:
@@ -321,6 +411,9 @@ class Spell:
                 ww_mod = 1.10 if (player.zenith_active and getattr(player, 'has_weapon_of_wind', False)) else 1.0
 
                 final_glory = glory_dmg * (1 + player.versatility) * crit_m * hc_mod * ww_mod
+                if player.has_restore_balance and player.xuen_active:
+                    final_glory *= 1.05
+
                 extra_damage += final_glory
                 player.chi = min(player.max_chi, player.chi + 1)
                 if damage_meter is not None:
@@ -343,7 +436,6 @@ class Spell:
             # [Shado-Pan] Stand Ready
             if getattr(player, 'has_stand_ready', False):
                 player.stand_ready_active = True
-                # Removed max_flurry_charges limit
                 player.flurry_charges += 10
 
             if other_spells and 'RSK' in other_spells:
@@ -367,6 +459,9 @@ class Spell:
                  ww_mod *= 1.20
 
             zenith_burst = zenith_burst * (1.0 + player.versatility) * hc_mod * ww_mod
+            if player.has_restore_balance and player.xuen_active:
+                zenith_burst *= 1.05
+
             zenith_final = self._apply_aoe_scaling(zenith_burst, player, 'soft_cap')
             extra_damage += zenith_final
 
@@ -381,6 +476,16 @@ class Spell:
             player.xuen_active = True
             player.xuen_duration = 24.0
             player.update_stats()
+            # [COTC]
+            if player.has_cotc_base:
+                player.can_cast_conduit = True
+                player.conduit_window_timer = 60.0
+                player.advance_inner_compass()
+                player.guaranteed_courage_proc = True
+
+        if self.abbr == 'Conduit':
+             player.advance_inner_compass()
+
 
         # Flurry of Xuen
         if getattr(player, 'has_flurry_of_xuen', False):
@@ -404,6 +509,9 @@ class Spell:
                 crit_m = 2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus
                 fox_expected = fox_final * (1 + (fox_crit_chance * (crit_m - 1)))
 
+                if player.has_restore_balance and player.xuen_active:
+                    fox_expected *= 1.05
+
                 extra_damage += fox_expected
                 extra_damage_details.append({
                     'name': 'Flurry of Xuen',
@@ -421,6 +529,8 @@ class Spell:
                 eh_crit_chance += player.teb_active_bonus
             is_crit_eh = random.random() < eh_crit_chance
             eh_dmg = eh_base * (1.0 + player.versatility) * (2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus if is_crit_eh else 1.0)
+            if player.has_restore_balance and player.xuen_active:
+                eh_dmg *= 1.05
             extra_damage += eh_dmg
 
             extra_damage_details.append({
@@ -455,6 +565,9 @@ class Spell:
                 breakdown['extra_events'] = extra_damage_details
                 breakdown['extra_damage_total'] = extra_damage
 
+            # [COTC] Record Total Spell Damage
+            player.record_damage(total_damage)
+
             if self.abbr == 'RSK' and getattr(player, 'rwk_ready', False):
                  player.rwk_ready = False
 
@@ -465,6 +578,26 @@ class Spell:
                          other_spells['FOF'].current_cd = max(0, other_spells['FOF'].current_cd - 4.0)
 
             return total_damage, breakdown
+
+    def _apply_aoe_scaling(self, damage_per_target, player, aoe_type):
+        target_count = player.target_count
+        if aoe_type == 'single':
+            return damage_per_target
+
+        elif aoe_type == 'cleave':
+            total = damage_per_target
+            if target_count > 1:
+                secondary_targets = min(target_count - 1, 2)
+                total += damage_per_target * 0.80 * secondary_targets
+            return total
+
+        elif aoe_type == 'soft_cap':
+            return damage_per_target * target_count * self._get_aoe_modifier(target_count, 5)
+
+        elif aoe_type == 'uncapped':
+             return damage_per_target * target_count
+
+        return damage_per_target
 
     def _calculate_flurry_strikes_damage(self, player, stacks, scale=1.0):
         # Base: 0.6 AP per stack
@@ -484,6 +617,9 @@ class Spell:
 
         crit_mult = 2.0
 
+        if player.has_restore_balance and player.xuen_active:
+             f_mod *= 1.05
+
         # Weapons of the Wall? No specific mention for Flurry.
 
         flurry_total = flurry_base * f_mod * (1 + (crit_c * (crit_mult - 1)))
@@ -495,6 +631,8 @@ class Spell:
             sob_mod = 1.0 + player.versatility
             if getattr(player, 'has_universal_energy', False):
                 sob_mod *= 1.15
+            if player.has_restore_balance and player.xuen_active:
+                sob_mod *= 1.05
 
             # Soft Cap 8
             sob_scale = self._get_aoe_modifier(player.target_count, 8)
@@ -507,6 +645,8 @@ class Spell:
             hi_base = 1.0 * player.attack_power * player.agility * stacks
             hi_mod = 1.0 + player.versatility
             # Physical -> No Univ Energy
+            if player.has_restore_balance and player.xuen_active:
+                hi_mod *= 1.05
 
             hi_scale = self._get_aoe_modifier(player.target_count, 8)
 
@@ -577,6 +717,11 @@ class Spell:
             current_mult *= 1.05
             modifiers.append("Shadowboxing: x1.05")
 
+        # [COTC] Xuen's Guidance +10% TP
+        if self.abbr == 'TP' and getattr(player, 'has_xuens_guidance', False):
+             current_mult *= 1.10
+             modifiers.append("XuensGuidance: x1.10")
+
         if getattr(player, 'has_hit_combo', False) and player.hit_combo_stacks > 0:
             hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
             current_mult *= hc_mod
@@ -589,6 +734,11 @@ class Spell:
         if player.zenith_active and getattr(player, 'has_weapon_of_wind', False):
             current_mult *= 1.10
             modifiers.append("WeaponOfWind: x1.10")
+
+        # [COTC] Restore Balance
+        if getattr(player, 'has_restore_balance', False) and player.xuen_active:
+             current_mult *= 1.05
+             modifiers.append("RestoreBalance: x1.05")
 
         is_nature = (self.damage_type == 'Nature')
         if is_rwk: is_nature = True
@@ -689,33 +839,57 @@ class Spell:
 
         return total_expected_dmg, breakdown
 
-    def _apply_aoe_scaling(self, damage_per_target, player, aoe_type):
-        target_count = player.target_count
-        if aoe_type == 'single':
-            return damage_per_target
+    def tick_cd(self, dt, player=None):
+        rate = 1.0
+        if player:
+            rate = player.cooldown_recovery_rate
 
-        elif aoe_type == 'cleave':
-            total = damage_per_target
-            if target_count > 1:
-                secondary_targets = min(target_count - 1, 2)
-                total += damage_per_target * 0.80 * secondary_targets
-            return total
-
-        elif aoe_type == 'soft_cap':
-            return damage_per_target * target_count * self._get_aoe_modifier(target_count, 5)
-
-        elif aoe_type == 'uncapped':
-             return damage_per_target * target_count
-
-        return damage_per_target
-
-    def tick_cd(self, dt):
         if self.charges < self.max_charges:
-            self.current_cd = max(0, self.current_cd - dt)
+            self.current_cd = max(0, self.current_cd - dt * rate)
             if self.current_cd == 0:
                 self.charges += 1
                 if self.charges < self.max_charges:
                     self.current_cd = self.base_cd
+
+class CelestialConduit(Spell):
+    def is_usable(self, player, other_spells):
+        if not super().is_usable(player): return False
+        return player.can_cast_conduit
+
+    def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
+        # 5 * 2.75 * AP
+        # Soft Cap 5
+        base = 5.0 * 2.75 * player.attack_power * player.agility
+
+        # Modifiers
+        mult = 1.0 + player.versatility
+        if player.has_universal_energy: mult *= 1.15
+        if getattr(player, 'has_restore_balance', False) and player.xuen_active:
+             mult *= 1.05
+
+        # Path of Falling Star
+        targets = player.target_count
+        if getattr(player, 'has_path_of_falling_star', False):
+             # 1 target: +100%. Each extra: -20% bonus.
+             bonus = max(0.0, 1.0 - 0.2 * (targets - 1))
+             mult *= (1.0 + bonus)
+
+        # Crit
+        crit = player.crit
+        crit_m = 2.0
+
+        # Soft Cap 5
+        scale = self._get_aoe_modifier(targets, 5)
+
+        total = base * mult * targets * scale * (1 + (crit * (crit_m - 1)))
+
+        breakdown = {
+            'base': int(base),
+            'modifiers': [f"Scale: {scale:.2f}"],
+            'targets': targets,
+            'total_dmg_after_aoe': total
+        }
+        return total, breakdown
 
 class TouchOfDeath(Spell):
     def is_usable(self, player, other_spells):
@@ -781,15 +955,18 @@ class SpellBook:
             'SW': Spell('SW', 8.96, name="Slicing Winds", cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown', aoe_type='single', damage_type='Physical'),
             'Xuen': Spell('Xuen', 0.0, name="Invoke Xuen", cd=120.0, req_talent=True, gcd_override=0.0, category='Major Cooldown'),
             'Zenith': Spell('Zenith', 0.0, name="Zenith", cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown', aoe_type='soft_cap', damage_type='Nature'),
-            'ToD': TouchOfDeath('ToD', 0.0, name="Touch of Death", cd=90.0, energy=0, chi_gen=3, req_talent=False, category='Major Cooldown', aoe_type='single')
+            'ToD': TouchOfDeath('ToD', 0.0, name="Touch of Death", cd=90.0, energy=0, chi_gen=3, req_talent=False, category='Major Cooldown', aoe_type='single'),
+            'Conduit': CelestialConduit('Conduit', 0.0, name="Celestial Conduit", cd=0.0, is_channeled=True, ticks=4, cast_time=4.0, category='Major Cooldown', damage_type='Nature', req_talent=True)
         }
         self.spells['TP'].triggers_combat_wisdom = True
         self.spells['BOK'].triggers_sharp_reflexes = True
         self.active_talents = active_talents if active_talents else []
         self.talent_manager = TalentManager()
+        self.player = None
 
     def apply_talents(self, player):
+        self.player = player
         self.talent_manager.apply_talents(self.active_talents, player, self)
 
     def tick(self, dt):
-        for s in self.spells.values(): s.tick_cd(dt)
+        for s in self.spells.values(): s.tick_cd(dt, player=self.player)
