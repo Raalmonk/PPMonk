@@ -47,7 +47,14 @@ class SpellModTalent(Talent):
     def apply(self, player, spell_book):
         if self.spell_abbr in spell_book.spells:
             spell = spell_book.spells[self.spell_abbr]
-            if hasattr(spell, self.attr_name):
+            # Use specific methods if attr_name matches new list system
+            if self.attr_name == 'damage_multiplier':
+                # Map to add_modifier
+                 val = 1.0 + self.value if self.is_percentage else self.value
+                 spell.add_modifier(self.name, val)
+            elif self.attr_name == 'bonus_crit_chance':
+                 spell.add_crit_modifier(self.name, self.value)
+            elif hasattr(spell, self.attr_name):
                 base_val = getattr(spell, self.attr_name)
                 if self.is_percentage:
                     setattr(spell, self.attr_name, base_val * (1.0 + self.value))
@@ -92,7 +99,7 @@ class HardenedSolesTalent(Talent):
     def apply(self, player, spell_book):
         if 'BOK' in spell_book.spells:
             bok = spell_book.spells['BOK']
-            bok.bonus_crit_chance += 0.06 * self.rank
+            bok.add_crit_modifier(self.name, 0.06 * self.rank)
             bok.crit_damage_bonus += 0.10 * self.rank
 
 class AscensionTalent(Talent):
@@ -105,78 +112,67 @@ class AscensionTalent(Talent):
 class TouchOfTheTigerTalent(Talent):
     def apply(self, player, spell_book):
         if 'TP' in spell_book.spells:
-            spell_book.spells['TP'].damage_multiplier *= 1.15
+            spell_book.spells['TP'].add_modifier(self.name, 1.15)
 
 # --- Row 4 ---
 
 class DualThreatTalent(Talent):
-    """4-1: Dual Threat (自动攻击强化)"""
     def apply(self, player, spell_book):
         player.has_dual_threat = True
 
 class TeachingsOfTheMonasteryTalent(Talent):
-    """4-2: Teachings of the Monastery (禅院教诲)"""
     def apply(self, player, spell_book):
         player.has_totm = True
 
 class GloryOfTheDawnTalent(Talent):
-    """4-3: Glory of the Dawn (旭日峥嵘)"""
     def apply(self, player, spell_book):
         player.has_glory_of_the_dawn = True
 
 # --- Row 5 ---
 
 class CraneVortexTalent(Talent):
-    """5-1: Crane Vortex (SCK +15%)"""
     def apply(self, player, spell_book):
         if 'SCK' in spell_book.spells:
             spell_book.spells['SCK'].ap_coeff *= 1.15
             spell_book.spells['SCK'].update_tick_coeff()
 
 class MeridianStrikesTalent(Talent):
-    """5-2: Meridian Strikes (ToD CD -45s, Dmg +15%)"""
     def apply(self, player, spell_book):
         if 'ToD' in spell_book.spells:
             tod = spell_book.spells['ToD']
             tod.base_cd = 45.0
-            tod.damage_multiplier *= 1.15
+            tod.add_modifier(self.name, 1.15)
 
 class RisingStarTalent(Talent):
-    """5-3: Rising Star (RSK +15% Dmg, +12% Crit Dmg)"""
     def apply(self, player, spell_book):
         if 'RSK' in spell_book.spells:
             rsk = spell_book.spells['RSK']
-            rsk.damage_multiplier *= 1.15
+            rsk.add_modifier(self.name, 1.15)
             rsk.crit_damage_bonus += 0.12
 
 class HitComboTalent(Talent):
-    """5-5: Hit Combo"""
     def apply(self, player, spell_book):
         player.has_hit_combo = True
 
 class BrawlerIntensityTalent(Talent):
-    """5-6: Brawler's Intensity (RSK CD -1s, BOK Dmg +12%)"""
     def apply(self, player, spell_book):
         if 'RSK' in spell_book.spells:
             spell_book.spells['RSK'].base_cd -= 1.0
         if 'BOK' in spell_book.spells:
-            spell_book.spells['BOK'].damage_multiplier *= 1.12
+            spell_book.spells['BOK'].add_modifier(self.name, 1.12)
 
-# --- Row 6 (Task 2 & 3) ---
+# --- Row 6 ---
 
 class JadeIgnitionTalent(Talent):
-    """6-1: Jade Ignition"""
     def apply(self, player, spell_book):
         player.has_jade_ignition = True
 
 class CyclonesDriftTalent(Talent):
-    """6-2: Cyclone's Drift (Haste 10% Multi)"""
     def apply(self, player, spell_book):
         player.has_cyclones_drift = True
         player.update_stats()
 
 class CrashingStrikesTalent(Talent):
-    """6-2_b: Crashing Strikes (FOF 5s, 6 Ticks)"""
     def apply(self, player, spell_book):
         if 'FOF' in spell_book.spells:
             fof = spell_book.spells['FOF']
@@ -185,53 +181,116 @@ class CrashingStrikesTalent(Talent):
             fof.update_tick_coeff()
 
 class DrinkingHornCoverTalent(Talent):
-    """6-3_b: Drinking Horn Cover (Zenith Duration +5s)"""
     def apply(self, player, spell_book):
         player.has_drinking_horn_cover = True
 
 class SpiritualFocusTalent(Talent):
-    """6-3: Spiritual Focus (Zenith CD 90->70)"""
     def apply(self, player, spell_book):
         if 'Zenith' in spell_book.spells:
             spell_book.spells['Zenith'].base_cd = 70.0
 
 class ObsidianSpiralTalent(Talent):
-    """6-4: Obsidian Spiral (BOK +1 Chi during Zenith)"""
     def apply(self, player, spell_book):
         player.has_obsidian_spiral = True
 
 class ComboBreakerTalent(Talent):
-    """6-5: Combo Breaker (TP proc free BOK)"""
     def apply(self, player, spell_book):
         player.has_combo_breaker = True
 
-# --- Row 7 (Task 3) ---
+# --- Row 7 ---
 
 class DanceOfChiJiTalent(Talent):
-    """7-1: Dance of Chi-Ji"""
     def apply(self, player, spell_book):
         player.has_dance_of_chiji = True
 
 class ShadowboxingTreadsTalent(Talent):
-    """7-2: Shadowboxing Treads (BOK +5% dmg, Cleave)"""
     def apply(self, player, spell_book):
         player.has_shadowboxing = True
 
 class EnergyBurstTalent(Talent):
-    """7-4: Energy Burst (Consume Combo Breaker -> +1 Chi)"""
     def apply(self, player, spell_book):
         player.has_energy_burst = True
 
 class InnerPeaceTalent(Talent):
-    """7-5: Inner Peace (Max Energy +30, TP Cost -5)"""
     def apply(self, player, spell_book):
         player.max_energy += 30.0
-        # Re-top energy if just initialized
-        if player.energy > player.max_energy - 35.0: # Heuristic
+        if player.energy > player.max_energy - 35.0:
              player.energy = player.max_energy
 
         if 'TP' in spell_book.spells:
-            spell_book.spells['TP'].energy_cost = 45 # 50 -> 45
+            spell_book.spells['TP'].energy_cost = 45
+
+# --- Rows 8 & 9 (New Talents) ---
+
+class SequencedStrikesTalent(Talent):
+    """8-2: Sequenced Strikes"""
+    def apply(self, player, spell_book):
+        player.has_sequenced_strikes = True
+
+class SunfireSpiralTalent(Talent):
+    """8-3: Sunfire Spiral (RSK Mastery +20%)"""
+    def apply(self, player, spell_book):
+        player.has_sunfire_spiral = True
+
+class CommunionWithWindTalent(Talent):
+    """8-4: Communion with Wind"""
+    def apply(self, player, spell_book):
+        player.has_communion_with_wind = True
+
+class RevolvingWhirlTalent(Talent):
+    """8-5 (Choice 1): Revolving Whirl"""
+    def apply(self, player, spell_book):
+        player.has_revolving_whirl = True
+
+class EchoTechniqueTalent(Talent):
+    """8-5 (Choice 2): Echo Technique"""
+    def apply(self, player, spell_book):
+        player.has_echo_technique = True
+
+class UniversalEnergyTalent(Talent):
+    """8-6: Universal Energy"""
+    def apply(self, player, spell_book):
+        player.has_universal_energy = True
+
+class MemoryOfMonasteryTalent(Talent):
+    """8-7: Memory of the Monastery"""
+    def apply(self, player, spell_book):
+        player.has_memory_of_monastery = True
+        # TP damage +15% is handled in Spell logic or here.
+        # Better handled in Spell.calculate_tick_damage via flag or just add modifier here?
+        # The prompt says "TP Dmg +15%", "Proc 10%".
+        # I added flag 'has_memory_of_monastery' and logic in SpellBook.
+
+class RushingWindKickTalent(Talent):
+    """9-2: Rushing Wind Kick"""
+    def apply(self, player, spell_book):
+        player.has_rushing_wind_kick = True
+
+class XuensBattlegearTalent(Talent):
+    """9-3: Xuen's Battlegear"""
+    def apply(self, player, spell_book):
+        player.has_xuens_battlegear = True
+
+class ThunderfistTalent(Talent):
+    """9-4: Thunderfist"""
+    def apply(self, player, spell_book):
+        player.has_thunderfist = True
+
+class WeaponOfTheWindTalent(Talent):
+    """9-5: Weapon of the Wind"""
+    def apply(self, player, spell_book):
+        player.has_weapon_of_wind = True
+
+class KnowledgeBrokenTempleTalent(Talent):
+    """9-6: Knowledge of the Broken Temple"""
+    def apply(self, player, spell_book):
+        player.has_knowledge_of_broken_temple = True
+        player.max_totm_stacks = 8
+
+class JadefireStompTalent(Talent):
+    """9-8: Jadefire Stomp"""
+    def apply(self, player, spell_book):
+        player.has_jadefire_stomp = True
 
 
 # --- 完整数据库 ---
@@ -280,22 +339,27 @@ TALENT_DB = {
     '7-4': EnergyBurstTalent('Energy Burst'),
     '7-5': InnerPeaceTalent('Inner Peace'),
 
-    # Placeholders for future
+    # Row 8
     '8-1': PlaceholderTalent('Tiger Eye Brew'),
-    '8-2': PlaceholderTalent('Sequenced Strikes'),
-    '8-3': PlaceholderTalent('Sunfire Spiral'),
-    '8-4': PlaceholderTalent('Communion with Wind'),
-    '8-5': PlaceholderTalent('Revolving Choice'),
-    '8-6': PlaceholderTalent('Universal Energy'),
-    '8-7': PlaceholderTalent('Memory of Monastery'),
+    '8-2': SequencedStrikesTalent('Sequenced Strikes'),
+    '8-3': SunfireSpiralTalent('Sunfire Spiral'),
+    '8-4': CommunionWithWindTalent('Communion with Wind'),
+    '8-5': RevolvingWhirlTalent('Revolving Whirl'), # Default choice
+    '8-5_b': EchoTechniqueTalent('Echo Technique'),
+    '8-6': UniversalEnergyTalent('Universal Energy'),
+    '8-7': MemoryOfMonasteryTalent('Memory of Monastery'),
+
+    # Row 9
     '9-1': PlaceholderTalent('TEB Buff'),
-    '9-2': PlaceholderTalent('Rushing Jade Wind'),
-    '9-3': UnlockSpellTalent('Invoke Xuen', 'Xuen'),
-    '9-4': PlaceholderTalent('Thunderfist'),
-    '9-5': PlaceholderTalent('Weapon of Wind'),
-    '9-6': PlaceholderTalent('Knowledge'),
+    '9-2': RushingWindKickTalent('Rushing Wind Kick'),
+    '9-3': XuensBattlegearTalent('Xuens Battlegear'),
+    '9-4': ThunderfistTalent('Thunderfist'),
+    '9-5': WeaponOfTheWindTalent('Weapon of Wind'),
+    '9-6': KnowledgeBrokenTempleTalent('Knowledge of Broken Temple'),
     '9-7': UnlockSpellTalent('Slicing Winds', 'SW'),
-    '9-8': PlaceholderTalent('Jadefire Stomp'),
+    '9-8': JadefireStompTalent('Jadefire Stomp'),
+
+    # Row 10
     '10-1': PlaceholderTalent('TEB Final'),
     '10-2': PlaceholderTalent('Skyfire Heel'),
     '10-3': PlaceholderTalent('Harmonic Combo'),
@@ -304,7 +368,7 @@ TALENT_DB = {
     '10-6': PlaceholderTalent('Airborne Rhythm'),
     '10-7': PlaceholderTalent('Path of Jade'),
 
-    # 兼容旧 ID / Shortcuts
+    # Shortcuts
     'WDP': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
     'SW': UnlockSpellTalent('Slicing Winds', 'SW'),
     'SOTWL': UnlockSpellTalent('Strike of the Windlord', 'SOTWL'),

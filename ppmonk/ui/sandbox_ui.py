@@ -23,7 +23,7 @@ class SandboxWindow(ctk.CTkToplevel):
         self.force_proc_glory = tk.BooleanVar(value=False)
         self.force_proc_reset = tk.BooleanVar(value=False)
         self.target_hp_pct = tk.DoubleVar(value=1.0)
-        self.target_count = tk.IntVar(value=1) # [Task 7: Target Count]
+        self.target_count = tk.IntVar(value=1)
 
         # Timeline drawing config
         self.pixels_per_second = 50
@@ -54,7 +54,7 @@ class SandboxWindow(ctk.CTkToplevel):
         self.hp_label = ctk.CTkLabel(top_panel, text="100%")
         self.hp_label.pack(side="left", padx=2)
 
-        # [Task 7: Target Count]
+        # Target Count
         ctk.CTkLabel(top_panel, text="Targets:").pack(side="left", padx=10)
         self.target_slider = ctk.CTkSlider(top_panel, from_=1, to=20, number_of_steps=19, variable=self.target_count, command=self._on_target_change, width=150)
         self.target_slider.pack(side="left", padx=5)
@@ -74,7 +74,7 @@ class SandboxWindow(ctk.CTkToplevel):
         self.status_label_xuen = ctk.CTkLabel(top_panel, text="Xuen: Inactive", font=("Arial", 12), text_color="gray")
         self.status_label_xuen.pack(side="left", padx=15)
 
-        # Buff Status (Combo Breaker / DocJ)
+        # Buff Status
         self.status_label_buffs = ctk.CTkLabel(top_panel, text="", font=("Arial", 10), text_color="#A9DFBF")
         self.status_label_buffs.pack(side="left", padx=15)
 
@@ -166,11 +166,10 @@ class SandboxWindow(ctk.CTkToplevel):
             self.agility_entry.delete(0, "end")
             self.agility_entry.insert(0, "2000")
 
-        # [Task 1 & 7] Pass talents and target count
         self.player = PlayerState(agility=agility, target_count=self.target_count.get())
         self.player.target_health_pct = self.target_hp_pct.get()
 
-        # If active_talents passed from main UI, use them. Otherwise default set for debug.
+        # Update default talents to include interesting new ones
         talents_to_use = self.active_talents if self.active_talents else [
             "1-1",
             "2-1", "2-2", "2-3",
@@ -178,7 +177,10 @@ class SandboxWindow(ctk.CTkToplevel):
             "4-1", "4-2", "4-3",
             "5-1", "5-2", "5-3", "5-4", "5-5", "5-6",
             "6-1", "6-2", "6-2_b",
-            "WDP", "SW", "SOTWL"
+            "WDP", "SW", "SOTWL",
+            # Enable new stuff for testing
+            "8-5", "8-5_b", "8-6", "8-7",
+            "9-2", "9-3", "9-4", "9-5", "9-8"
         ]
 
         self.spell_book = SpellBook(talents=talents_to_use)
@@ -192,18 +194,15 @@ class SandboxWindow(ctk.CTkToplevel):
         self._refresh_spell_buttons()
 
     def _draw_timeline_grid(self):
-        # Draw background lines for seconds
         for i in range(0, 100):
             x = i * self.pixels_per_second
             color = "#404040" if i % 5 != 0 else "#606060"
             self.canvas.create_line(x, 0, x, self.timeline_height, fill=color)
             self.canvas.create_text(x + 2, self.timeline_height - 15, text=f"{i}s", anchor="w", fill="white", font=("Arial", 8))
 
-        # Lane Labels
         self.canvas.create_text(5, self.active_lane_y - 20, text="Active Spells", anchor="w", fill="#3498DB", font=("Arial", 10, "bold"))
         self.canvas.create_text(5, self.passive_lane_y - 20, text="Passive / Auto Attacks", anchor="w", fill="#95A5A6", font=("Arial", 10, "bold"))
 
-        # Current Time Indicator (Red Line)
         self.time_indicator = self.canvas.create_line(0, 0, 0, self.timeline_height, fill="red", width=2)
 
     def _update_status(self):
@@ -223,13 +222,16 @@ class SandboxWindow(ctk.CTkToplevel):
             buffs.append(f"DanceChiJi({self.player.dance_of_chiji_stacks})")
         if self.player.hit_combo_stacks > 0:
             buffs.append(f"HitCombo({self.player.hit_combo_stacks})")
+        if self.player.thunderfist_stacks > 0:
+            buffs.append(f"Thunderfist({self.player.thunderfist_stacks})")
+        if self.player.totm_stacks > 0:
+            buffs.append(f"TotM({self.player.totm_stacks})")
+        if self.player.rwk_ready:
+            buffs.append(f"RWK Ready")
 
         self.status_label_buffs.configure(text=" | ".join(buffs))
-
-        # Update button states (CD / Resource)
         self._update_button_visuals_only()
 
-        # Move Red Line
         x = self.time_elapsed * self.pixels_per_second
         self.canvas.coords(self.time_indicator, x, 0, x, self.timeline_height)
 
@@ -270,7 +272,7 @@ class SandboxWindow(ctk.CTkToplevel):
                 text=spell.name,
                 command=lambda k=key: self._handle_cast_click(k)
             )
-            btn.spell_key = key # Tag for updates
+            btn.spell_key = key
             btn.pack(pady=4, padx=5, fill="x")
 
         # Wait Button
@@ -280,12 +282,10 @@ class SandboxWindow(ctk.CTkToplevel):
     def _handle_cast_click(self, key):
         spell = self.spell_book.spells[key]
 
-        # 1. Rejection Logic
         if not spell.is_usable(self.player, self.spell_book.spells):
             self._show_rejection_popup(key)
             return
 
-        # 2. Cast
         force_glory = self.force_proc_glory.get()
         force_reset = self.force_proc_reset.get()
 
@@ -299,12 +299,10 @@ class SandboxWindow(ctk.CTkToplevel):
         dmg, breakdown = spell.cast(self.player, other_spells=self.spell_book.spells,
                                     force_proc_glory=force_glory, force_proc_reset=force_reset)
 
-        # 3. Draw Active Block
         step_duration = max(cast_time, gcd) if cast_time > 0 else gcd
         if step_duration < 0.1: step_duration = 0.1
 
-        # Color coding
-        color = "#1ABC9C" # Default Teal
+        color = "#1ABC9C"
         if key == "RSK": color = "#E74C3C"
         elif key == "FOF": color = "#8E44AD"
         elif key == "TP": color = "#27AE60"
@@ -319,7 +317,6 @@ class SandboxWindow(ctk.CTkToplevel):
             info={"Damage": dmg, "Breakdown": breakdown}
         )
 
-        # 4. Advance Time & Handle Passive Events
         self._advance_simulation(step_duration)
 
     def _advance_simulation(self, duration):
@@ -328,14 +325,11 @@ class SandboxWindow(ctk.CTkToplevel):
         self.spell_book.tick(duration)
         self.time_elapsed += duration
 
-        # Process Passive Events
         for event in events:
-            # event keys: Action, source, offset, Expected DMG, Breakdown
             if event.get('source') == 'passive':
                 evt_time = base_time + event.get('offset', 0.0)
                 name = event.get('Action')
 
-                # Draw small marker for passive
                 self._record_and_draw(
                     lane_y=self.passive_lane_y + (0 if "Auto" in name else 25),
                     start_time=evt_time,
@@ -345,7 +339,6 @@ class SandboxWindow(ctk.CTkToplevel):
                     info={"Damage": event.get('Expected DMG'), "Breakdown": event.get('Breakdown')}
                 )
             elif event.get('source') == 'active':
-                # Channel ticks
                 evt_time = base_time + event.get('offset', 0.0)
                 self._record_and_draw(
                     lane_y=self.active_lane_y + 40,
@@ -359,7 +352,6 @@ class SandboxWindow(ctk.CTkToplevel):
         self._update_status()
 
     def _record_and_draw(self, lane_y, start_time, duration, text, color, info):
-        # Record for redraw
         self.event_history.append({
             'lane_y': lane_y,
             'start_time': start_time,
@@ -368,7 +360,6 @@ class SandboxWindow(ctk.CTkToplevel):
             'color': color,
             'info': info
         })
-        # Draw immediate
         self._draw_block(lane_y, start_time, duration, text, color, info)
 
     def _draw_block(self, lane_y, start_time, duration, text, color, info):
@@ -381,8 +372,6 @@ class SandboxWindow(ctk.CTkToplevel):
 
         rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="black", tags=tag)
         lbl = self.canvas.create_text((x1+x2)/2, (y1+y2)/2, text=text, fill="white", font=("Arial", 9, "bold"), tags=tag)
-
-        # Bind Click
         self.canvas.tag_bind(tag, "<Button-1>", lambda e, i=info, n=text: self._show_tooltip(e, n, i))
 
     def _show_rejection_popup(self, spell_key):
@@ -395,10 +384,9 @@ class SandboxWindow(ctk.CTkToplevel):
         ctk.CTkButton(top, text="OK", command=top.destroy).pack(pady=10)
 
     def _show_tooltip(self, event, name, info):
-        # Simple popup using a Toplevel
         top = ctk.CTkToplevel(self)
         top.title(f"Details: {name}")
-        top.geometry("400x300")
+        top.geometry("400x350")
 
         dmg_val = int(info['Damage'])
         ctk.CTkLabel(top, text=f"Action: {name}", font=("Arial", 16, "bold")).pack(pady=10)
@@ -408,19 +396,28 @@ class SandboxWindow(ctk.CTkToplevel):
         text_info = ""
 
         if isinstance(breakdown, dict):
-            # Render structured dict
             text_info += f"Base: {breakdown.get('base')}\n"
+
+            # New Modifier List Display
             text_info += "Modifiers:\n"
-            for k, v in breakdown.get('modifiers', {}).items():
-                text_info += f"  - {k}: x{v:.2f}\n"
+            mods = breakdown.get('modifiers', [])
+            if isinstance(mods, list):
+                for m in mods:
+                    text_info += f"  - {m}\n"
+            elif isinstance(mods, dict): # Fallback
+                for k, v in mods.items():
+                    text_info += f"  - {k}: x{v:.2f}\n"
 
-            if breakdown.get('flags'):
-                text_info += f"Flags: {', '.join(breakdown['flags'])}\n"
+            # Crit Sources
+            crit_src = breakdown.get('crit_sources', [])
+            if crit_src:
+                text_info += "\nCrit Sources:\n"
+                for c in crit_src:
+                    text_info += f"  - {c}\n"
 
-            text_info += f"Crit Chance: {breakdown.get('crit_chance', 0)*100:.1f}%\n"
+            text_info += f"\nFinal Crit: {breakdown.get('final_crit', 0)*100:.1f}%\n"
             text_info += f"Crit Mult: {breakdown.get('crit_mult', 2.0):.2f}x\n"
 
-            # AOE Info
             if 'aoe_type' in breakdown:
                  text_info += f"\nAOE Type: {breakdown['aoe_type']}\n"
                  text_info += f"Targets: {breakdown.get('targets')}\n"
@@ -428,6 +425,8 @@ class SandboxWindow(ctk.CTkToplevel):
                      text_info += "  (Main + up to 2 Secondary @ 80%)\n"
                  elif breakdown['aoe_type'] == 'soft_cap':
                      text_info += "  (SQRT scaling > 5 targets)\n"
+                 if 'total_dmg_after_aoe' in breakdown:
+                     text_info += f"Total AOE Dmg: {int(breakdown['total_dmg_after_aoe'])}\n"
 
             if 'extra_events' in breakdown:
                 text_info += "\nExtra Events:\n"
@@ -436,7 +435,7 @@ class SandboxWindow(ctk.CTkToplevel):
         else:
             text_info = str(breakdown)
 
-        textbox = ctk.CTkTextbox(top, width=350, height=200)
+        textbox = ctk.CTkTextbox(top, width=380, height=220)
         textbox.pack(pady=10)
         textbox.insert("1.0", text_info)
         textbox.configure(state="disabled")
