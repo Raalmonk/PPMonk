@@ -178,12 +178,10 @@ class TalentNode:
             self.onClick(self.id, 1)
         else:
             if self.is_choice:
-                # Task 4: Choice Node Switching
-                # Toggle choice index and refresh text
+                # 切换选项
                 self.current_choice_idx = 1 - self.current_choice_idx
-                self.btn.configure(text=self._get_text())
-                # Note: The parent container will handle saving the correct ID based on index
-                # We don't need to change rank, it stays active (rank 1)
+                self.btn.configure(text=self._get_text())  # 立即刷新文字
+                # 不需要调用 onClick 改变 rank，只是切换状态
             elif self.current_rank < self.max_rank:
                 # 升级
                 self.onClick(self.id, 1)
@@ -241,19 +239,6 @@ class TalentTreeWindow(ctk.CTkToplevel):
         ctk.CTkLabel(self.control_panel, text="Hero Tree:", font=("Arial", 12, "bold")).pack(side="left", padx=10)
         ctk.CTkRadioButton(self.control_panel, text="Shado-Pan", variable=self.hero_talent_var, value="Shado-Pan").pack(side="left", padx=5)
         ctk.CTkRadioButton(self.control_panel, text="Conduit", variable=self.hero_talent_var, value="Conduit").pack(side="left", padx=5)
-
-        # Task 4: Select All Hero Talents Logic (Implied by auto-selection on save or explicit button?
-        # User asked for button or logic. Let's add a button for clarity if needed,
-        # but the prompt said "Select All Hero Talents" button OR logic.
-        # I'll implement logic that AUTO-SELECTS them upon saving if the tree is active,
-        # OR I can add a button. A button is safer for user control.
-        # However, typically Hero Talents are auto-filled in many sims.
-        # Let's add a button "Select All Hero" for the current tree?
-        # Actually, Hero Talents are not visualized as nodes here (Standard Tree is).
-        # They are just a dropdown selection.
-        # So "Select All" implies: "When I pick Shado-Pan, enable all Shado-Pan talents".
-        # Since I am just injecting them on Save (see _on_save), they ARE effectively "Select All"ed.
-        # I will leave it as "Auto Select All" in _on_save logic which meets the requirement "modify logic... default light up all".
 
         save_btn = ctk.CTkButton(self.control_panel, text="Apply & Close", command=self._on_save, fg_color="#1b8f61",
                                  width=150)
@@ -351,8 +336,7 @@ class TalentTreeWindow(ctk.CTkToplevel):
             else:
                 final_list.append(nid)
 
-        # Task 4: Hero Talent "Select All" Logic
-        # We auto-inject all related talents for the selected hero tree
+        # Inject Hero Talents
         hero_choice = self.hero_talent_var.get()
         if hero_choice == "Shado-Pan":
             # Shado-Pan IDs

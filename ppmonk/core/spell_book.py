@@ -5,7 +5,7 @@ from .talents import TalentManager
 class Spell:
     def __init__(self, abbr, ap_coeff, name=None, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
                  cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None,
-                 max_charges=1, category='', aoe_type='single', damage_type='Physical', duration=0.0):
+                 max_charges=1, category='', aoe_type='single', damage_type='Physical'):
         self.abbr = abbr
         self.name = name if name else abbr
         self.ap_coeff = ap_coeff
@@ -42,10 +42,6 @@ class Spell:
         self.bonus_crit_chance = 0.0
         self.crit_damage_bonus = 0.0
 
-        # New attributes
-        self.duration = duration
-        self.soft_cap = 5 if aoe_type == 'soft_cap' else 99
-
     def add_modifier(self, name, value):
         self.modifiers.append((name, value))
 
@@ -61,7 +57,7 @@ class Spell:
             base -= 5.0
         # Efficient Training (Zenith CD -10s)
         if self.abbr == 'Zenith' and getattr(player, 'has_stand_ready', False):
-             pass # Logic handled in talent application or here? Talent logic does it in apply.
+             pass
 
         # [COTC] Xuen Bond CD reduction
         if self.abbr == 'Xuen' and getattr(player, 'has_xuens_bond', False):
@@ -236,7 +232,7 @@ class Spell:
                      if random.random() < chance:
                          should_proc_courage = True
 
-            courage_dmg = 3.375 * player.attack_power # Removed Agility
+            courage_dmg = 3.375 * player.attack_power * player.agility
             c_mod = 1.0 + player.versatility
             c_mod *= player.get_physical_mitigation()
             if player.has_restore_balance and player.xuen_active:
@@ -285,7 +281,7 @@ class Spell:
                 'hi_damage': hi_total
             })
 
-        # [Shado-Pan] Wisdom of the Wall (Task 5: Zenith RSK/SCK trigger Flurry)
+        # [Shado-Pan] Wisdom of the Wall
         if getattr(player, 'has_wisdom_of_the_wall', False) and player.zenith_active:
             if self.abbr in ['RSK', 'SCK']:
                  flurry_total, sob_total, hi_total = self._calculate_flurry_strikes_damage(player, 3, scale=1.0, use_expected_value=use_expected_value)
@@ -301,7 +297,7 @@ class Spell:
 
         # Jade Ignition
         if self.abbr == 'SCK' and getattr(player, 'has_jade_ignition', False):
-            ji_base = 1.80 * player.attack_power # Removed Agility
+            ji_base = 1.80 * player.attack_power * player.agility
             ji_mods = 1.0 + player.versatility
             if getattr(player, 'has_hit_combo', False):
                 ji_mods *= (1.0 + player.hit_combo_stacks * 0.01)
@@ -344,7 +340,7 @@ class Spell:
             # Refund 2 TotM
             player.totm_stacks = min(player.max_totm_stacks, player.totm_stacks + 2)
 
-            stomp_base = 2.0 * player.attack_power # Removed Agility
+            stomp_base = 2.0 * player.attack_power * player.agility
             stomp_mod = 1.0 + player.versatility
             stomp_mod *= player.get_physical_mitigation()
             if player.has_restore_balance and player.xuen_active:
@@ -375,7 +371,7 @@ class Spell:
         if self.abbr == 'BOK' and player.has_totm:
             if player.totm_stacks > 0:
                 extra_hits = player.totm_stacks
-                dmg_per_hit = 0.847 * player.attack_power # Removed Agility
+                dmg_per_hit = 0.847 * player.attack_power * player.agility
 
                 hc_mod = 1.0
                 if getattr(player, 'has_hit_combo', False):
@@ -436,7 +432,7 @@ class Spell:
             elif not use_expected_value and random.random() < chance:
                 should_proc_glory = True
 
-            glory_dmg = 1.0 * player.attack_power # Removed Agility
+            glory_dmg = 1.0 * player.attack_power * player.agility
             hc_mod = 1.0
             if getattr(player, 'has_hit_combo', False):
                 hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
@@ -482,7 +478,6 @@ class Spell:
                 dur = 20.0
             player.zenith_duration = dur
 
-            # [Shado-Pan] Stand Ready (Task 5: Zenith -> 10 stacks)
             if getattr(player, 'has_stand_ready', False):
                 player.stand_ready_active = True
                 player.flurry_charges += 10
@@ -495,7 +490,7 @@ class Spell:
             player.teb_stacks = 0
             player.teb_active_bonus = consumed_stacks * 0.02
 
-            zenith_burst = 10.0 * player.attack_power # Removed Agility
+            zenith_burst = 10.0 * player.attack_power * player.agility
             hc_mod = 1.0
             if getattr(player, 'has_hit_combo', False):
                  hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
@@ -541,7 +536,7 @@ class Spell:
             elif not use_expected_value and random.random() < 0.10:
                 should_proc_fox = True
 
-            fox_base = 3.92 * player.attack_power # Removed Agility
+            fox_base = 3.92 * player.attack_power * player.agility
             fox_mod = 1.0 + player.versatility
             fox_crit_chance = player.crit
             if is_guaranteed: fox_crit_chance = 1.0
@@ -574,7 +569,7 @@ class Spell:
         if self.triggers_combat_wisdom and getattr(player, 'combat_wisdom_ready', False):
             player.combat_wisdom_ready = False
             player.combat_wisdom_timer = 15.0
-            eh_base = 1.2 * player.attack_power # Removed Agility
+            eh_base = 1.2 * player.attack_power * player.agility
             eh_crit_chance = player.crit + 0.15
             if player.zenith_active:
                 eh_crit_chance += player.teb_active_bonus
@@ -662,7 +657,7 @@ class Spell:
 
     def _calculate_flurry_strikes_damage(self, player, stacks, scale=1.0, use_expected_value=False):
         # Base: 0.6 AP per stack
-        flurry_base = 0.6 * player.attack_power * stacks * scale # Removed Agility
+        flurry_base = 0.6 * player.attack_power * player.agility * stacks * scale
 
         # Physical Mitigation
         mitigation = player.get_physical_mitigation()
@@ -688,7 +683,7 @@ class Spell:
         # Shado Over Battlefield (Nature AOE)
         sob_total = 0.0
         if getattr(player, 'has_shado_over_battlefield', False):
-            sob_base = 0.52 * player.attack_power * stacks # Removed Agility
+            sob_base = 0.52 * player.attack_power * player.agility * stacks
             sob_mod = 1.0 + player.versatility
             if getattr(player, 'has_universal_energy', False):
                 sob_mod *= 1.15
@@ -701,7 +696,7 @@ class Spell:
         # High Impact (Physical AOE)
         hi_total = 0.0
         if getattr(player, 'has_high_impact', False):
-            hi_base = 1.0 * player.attack_power * stacks # Removed Agility
+            hi_base = 1.0 * player.attack_power * player.agility * stacks
             hi_mod = 1.0 + player.versatility
             if player.has_restore_balance and player.xuen_active:
                 hi_mod *= 1.05
@@ -724,8 +719,7 @@ class Spell:
         if is_rwk:
             current_ap_coeff = 1.7975
 
-        # Fix Double Dipping: Remove Agility
-        base_dmg_per_target = current_ap_coeff * player.attack_power
+        base_dmg_per_target = current_ap_coeff * player.attack_power * player.agility
 
         modifiers = []
         crit_sources = []
@@ -762,7 +756,7 @@ class Spell:
             current_mult *= hidden_mod
             modifiers.append(f"HiddenAura: x{hidden_mod:.2f}")
 
-        aura_mod = 1.0
+        aura_mod = 1.04
         if self.abbr in ['TP', 'BOK', 'RSK', 'SCK', 'FOF', 'WDP', 'SOTWL']:
             aura_mod *= 1.04
         if aura_mod != 1.0:
@@ -888,8 +882,6 @@ class Spell:
         total_expected_dmg += skyfire_cleave
 
         breakdown = {
-            'coeff': f"{current_ap_coeff:.3f}",
-            'ap': f"{player.attack_power:.1f}",
             'base': int(base_dmg_per_target),
             'modifiers': modifiers,
             'crit_sources': crit_sources,
@@ -922,7 +914,7 @@ class CelestialConduit(Spell):
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0, use_expected_value=False):
         # 5 * 2.75 * AP
         # Soft Cap 5
-        base = 5.0 * 2.75 * player.attack_power # Removed Agility
+        base = 5.0 * 2.75 * player.attack_power * player.agility
 
         mult = 1.0 + player.versatility
         if player.has_universal_energy: mult *= 1.15
@@ -1024,7 +1016,7 @@ class SpellBook:
         self.spells['TP'].triggers_combat_wisdom = True
         self.spells['BOK'].triggers_sharp_reflexes = True
         self.active_talents = active_talents if active_talents else []
-        self.talent_manager = TalentManager(None) # Fixed: Will assign player later
+        self.talent_manager = TalentManager()
         self.player = None
 
     def apply_talents(self, player):
@@ -1033,12 +1025,3 @@ class SpellBook:
 
     def tick(self, dt):
         for s in self.spells.values(): s.tick_cd(dt, player=self.player)
-
-    def get_spell(self, name):
-        return self.spells.get(name)
-
-    def cast(self, spell_name, **kwargs):
-        # Support Sandbox calls
-        if spell_name in self.spells:
-            return self.spells[spell_name].cast(self.player, other_spells=self.spells, **kwargs)
-        return 0.0, {"error": "Unknown spell"}
