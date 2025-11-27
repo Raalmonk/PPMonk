@@ -87,12 +87,12 @@ MONK_TALENT_DATA = [
 
     # --- Simplified Hero Talents (Right Side) ---
 
-    # Shado-Pan Tree (Column 9-11 area)
-    {"id": "hero-sp-header", "label": "Shado-Pan\nTree", "row": 0, "col": 9, "max_rank": 1, "req": []},
-    {"id": "hero-sp-choice1", "label": "Pride of\nPandaria", "row": 1, "col": 9, "max_rank": 1, "req": ["hero-sp-header"],
+    # Shado-Pan Tree (Column 10)
+    {"id": "hero-sp-header", "label": "Shado-Pan\nTree", "row": 0, "col": 10, "max_rank": 1, "req": []},
+    {"id": "hero-sp-choice1", "label": "Pride of\nPandaria", "row": 1, "col": 10, "max_rank": 1, "req": ["hero-sp-header"],
      "is_choice": True, "choices": ["Pride of\nPandaria", "High\nImpact"]},
 
-    # Conduit of the Celestials Tree (Column 11 area)
+    # Conduit of the Celestials Tree (Column 11)
     {"id": "hero-cotc-header", "label": "Celestial\nTree", "row": 0, "col": 11, "max_rank": 1, "req": []},
     {"id": "hero-cotc-choice1", "label": "Xuen's\nGuidance", "row": 1, "col": 11, "max_rank": 1, "req": ["hero-cotc-header"],
      "is_choice": True, "choices": ["Xuen's\nGuidance", "Temple\nTraining"]},
@@ -139,8 +139,6 @@ class TalentNode:
             font=("Segoe UI", 10, "bold") if self.is_choice else ("Segoe UI", 10)
         )
         self.canvas_window = canvas.create_window(self.x, self.y, window=self.btn, anchor="nw")
-
-        # Right click to unlearn
         self.btn.bind("<Button-3>", self.on_right_click)
 
     def _get_text(self):
@@ -173,6 +171,7 @@ class TalentNode:
                 self.current_choice_idx = 1 - self.current_choice_idx
                 self.btn.configure(text=self._get_text())
                 # Clicking a choice node that is already active should technically just swap choices
+                # But we might need to notify parent to update selected ID list
                 self.onClick(self.id, 0) # 0 change means update/refresh
             elif self.current_rank < self.max_rank:
                 self.onClick(self.id, 1)
@@ -257,7 +256,7 @@ class TalentTreeWindow(ctk.CTkToplevel):
             self.nodes[data["id"]] = node
 
         # Labels for Hero sections
-        self.canvas.create_text(60 + 9 * X_GAP + 100, 20, text="HERO TALENTS", fill="#BDC3C7", font=("Arial", 14, "bold"))
+        self.canvas.create_text(60 + 10 * X_GAP + 50, 20, text="HERO TALENTS", fill="#BDC3C7", font=("Arial", 14, "bold"))
 
     def _on_node_click(self, node_id, change):
         node = self.nodes[node_id]
@@ -266,13 +265,10 @@ class TalentTreeWindow(ctk.CTkToplevel):
                 node.current_rank += 1
                 self.selected_talents.add(node_id)
         elif change < 0:
-            # We must use _can_unlearn to check if we can remove
             if node.current_rank > 0 and self._can_unlearn(node_id):
                 node.current_rank -= 1
                 if node.current_rank == 0:
                     self.selected_talents.discard(node_id)
-            elif node.current_rank > 0:
-                print(f"Cannot unlearn {node_id} due to dependencies.") # Debug/Feedback
 
         # If change == 0 (toggle choice), we just refresh
         self._refresh_state()
@@ -282,7 +278,6 @@ class TalentTreeWindow(ctk.CTkToplevel):
         if not reqs: return True
         for req_id in reqs:
             parent = self.nodes.get(req_id)
-            # Parent must be maxed out to unlock child
             if parent and parent.current_rank >= parent.max_rank:
                 return True
         return False
@@ -300,18 +295,18 @@ class TalentTreeWindow(ctk.CTkToplevel):
         # Standard check for others
         for other_id, other_node in self.nodes.items():
             if other_node.current_rank > 0 and node_id in other_node.reqs:
-                # This 'other_node' depends on 'node_id'.
-                # Can we still satisfy 'other_node' if we remove 'node_id'?
-                # Usually talents only have 1 parent in these trees, or simple OR logic.
-                # If dependencies are strict AND, then NO.
-                # Assuming strict dependency: if a child is active, parent cannot be unlearned.
-                return False
+                active_parents = 0
+                for p_id in other_node.reqs:
+                    if self.nodes[p_id].current_rank >= self.nodes[p_id].max_rank:
+                        active_parents += 1
+                if active_parents <= 1:
+                    return False
         return True
 
     def _refresh_state(self):
         total_points = 0
         for node_id, node in self.nodes.items():
-            if "hero-" not in node_id: # Don't count hero talents in standard points if preferred
+            if "hero-" not in node_id: # Don't count hero talents in standard points if preferred, but usually they are separate. Keeping simple sum for now.
                 total_points += node.current_rank
             is_active = node.current_rank > 0
             is_avail = self._is_node_available(node_id)
@@ -327,6 +322,20 @@ class TalentTreeWindow(ctk.CTkToplevel):
 
     def _on_save(self):
         final_list = []
+
+        # Simplified Mapping
+        hero_map = {
+            'hero-sp-header': 'ShadoPanBase',
+            'hero-sp-choice1': 'PrideOfPandaria', # Choice A
+            'hero-sp-choice1_b': 'HighImpact',    # Choice B
+
+            'hero-cotc-header': 'COTCBase',
+            'hero-cotc-choice1': 'XuensGuidance', # Choice A
+            'hero-cotc-choice1_b': 'TempleTraining', # Choice B
+            'hero-cotc-choice2': 'RestoreBalance', # Choice A
+            'hero-cotc-choice2_b': 'XuensBond',   # Choice B
+        }
+
         for nid in self.selected_talents:
             node = self.nodes[nid]
 
@@ -335,7 +344,13 @@ class TalentTreeWindow(ctk.CTkToplevel):
             if node.is_choice and node.current_choice_idx == 1:
                 lookup_key = nid + "_b"
 
-            final_list.append(lookup_key)
+            mapped_id = hero_map.get(lookup_key, lookup_key)
+
+            # Legacy Choice handling for non-hero talents
+            if "hero-" not in nid and node.is_choice and node.current_choice_idx == 1:
+                mapped_id = mapped_id + "_b"
+
+            final_list.append(mapped_id)
 
         self.on_close_callback(final_list)
         self.destroy()
