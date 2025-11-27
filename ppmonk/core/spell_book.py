@@ -3,10 +3,11 @@ from .talents import TalentManager
 
 
 class Spell:
-    def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
+    def __init__(self, abbr, ap_coeff, name=None, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
                  cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None,
                  max_charges=1, category=''):
         self.abbr = abbr
+        self.name = name if name else abbr
         self.ap_coeff = ap_coeff
         self.energy_cost = energy
         self.category = category
@@ -61,7 +62,7 @@ class Spell:
         if player.chi < cost: return False
         return True
 
-    def cast(self, player, other_spells=None, damage_meter=None):
+    def cast(self, player, other_spells=None, damage_meter=None, force_proc_glory=False, force_proc_reset=False):
         player.energy -= self.energy_cost
         actual_chi_cost = self.chi_cost
         if player.zenith_active and self.chi_cost > 0:
@@ -91,6 +92,7 @@ class Spell:
             player.totm_stacks = min(4, player.totm_stacks + 1)
 
         extra_damage = 0.0
+        extra_damage_details = []
 
         if self.abbr == 'BOK' and player.has_totm:
             if player.totm_stacks > 0:
@@ -104,14 +106,34 @@ class Spell:
                 if damage_meter is not None:
                     damage_meter['TotM'] = damage_meter.get('TotM', 0) + total_extra
 
+                extra_damage_details.append({
+                    'name': 'Teachings of the Monastery',
+                    'damage': total_extra,
+                    'hits': extra_hits,
+                    'crit': is_crit
+                })
+
                 player.totm_stacks = 0
 
-            if random.random() < 0.12 and other_spells and 'RSK' in other_spells:
+            # Force Reset Logic
+            should_reset = False
+            if force_proc_reset:
+                should_reset = True
+            elif random.random() < 0.12:
+                should_reset = True
+
+            if should_reset and other_spells and 'RSK' in other_spells:
                 other_spells['RSK'].current_cd = 0.0
 
         # 3. Glory of the Dawn
         if self.abbr == 'RSK' and player.has_glory_of_the_dawn:
-            if random.random() < player.haste:
+            should_proc_glory = False
+            if force_proc_glory:
+                should_proc_glory = True
+            elif random.random() < player.haste:
+                should_proc_glory = True
+
+            if should_proc_glory:
                 glory_dmg = 1.0 * player.attack_power
                 is_crit = random.random() < (player.crit + self.bonus_crit_chance)
                 crit_m = (2.0 + self.crit_damage_bonus) if is_crit else 1.0
@@ -120,6 +142,13 @@ class Spell:
                 player.chi = min(player.max_chi, player.chi + 1)
                 if damage_meter is not None:
                     damage_meter['Glory of Dawn'] = damage_meter.get('Glory of Dawn', 0) + final_glory
+
+                extra_damage_details.append({
+                    'name': 'Glory of the Dawn',
+                    'damage': final_glory,
+                    'crit': is_crit
+                })
+
         if self.abbr == 'Zenith':
             player.zenith_active = True
             player.zenith_duration = 15.0
@@ -142,6 +171,12 @@ class Spell:
             eh_dmg = eh_base * (1.0 + player.versatility) * (2.0 if is_crit_eh else 1.0)
             extra_damage += eh_dmg
 
+            extra_damage_details.append({
+                'name': 'Expel Harm (Passive)',
+                'damage': eh_dmg,
+                'crit': is_crit_eh
+            })
+
         triggers_mastery = self.is_combo_strike and (player.last_spell_name is not None) and (
                     player.last_spell_name != self.abbr)
         player.last_spell_name = self.abbr
@@ -155,44 +190,98 @@ class Spell:
             player.channel_tick_interval = self.get_tick_interval(player)
             player.time_until_next_tick = player.channel_tick_interval
             player.channel_mastery_snapshot = triggers_mastery
-            return 0.0, []
+
+            return 0.0, {'base': 0, 'modifiers': {}, 'flags': ['Channeling']}
         else:
-            base_dmg, log_details = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
+            base_dmg, breakdown = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
             total_damage = base_dmg + extra_damage
-            if isinstance(log_details, dict):
-                log_details['Expected DMG'] = total_damage
-            return total_damage, log_details
+
+            # Merge extra damage into breakdown
+            if extra_damage > 0:
+                breakdown['extra_damage'] = extra_damage_details
+                breakdown['total_damage'] = total_damage
+
+            return total_damage, breakdown
 
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
         base_dmg = self.tick_coeff * player.attack_power
+
+        modifiers = {}
+        flags = []
+
         dmg_mod = 1.0
+
+        # Spell Specific Mods
+        spell_mod = 1.0
         if self.abbr == 'RSK':
-            dmg_mod *= 1.70
+            spell_mod *= 1.70
         if self.abbr == 'SCK':
-            dmg_mod *= 1.10
-        dmg_mod *= 1.04
+            spell_mod *= 1.10
+        if spell_mod != 1.0:
+            modifiers['Spell'] = spell_mod
+        dmg_mod *= spell_mod
+
+        # Aura Mod
+        aura_mod = 1.04
         if self.abbr in ['TP', 'BOK', 'RSK', 'SCK', 'FOF', 'WDP', 'SOTWL']:
-            dmg_mod *= 1.04
+            aura_mod *= 1.04
+        if aura_mod != 1.0:
+            modifiers['Aura'] = aura_mod
+        dmg_mod *= aura_mod
+
         if self.haste_dmg_scaling:
-            dmg_mod *= (1.0 + player.haste)
+            h_mod = (1.0 + player.haste)
+            modifiers['HasteScale'] = h_mod
+            dmg_mod *= h_mod
+
         if self.tick_dmg_ramp > 0:
-            dmg_mod *= (1.0 + (tick_idx + 1) * self.tick_dmg_ramp)
+            ramp_mod = (1.0 + (tick_idx + 1) * self.tick_dmg_ramp)
+            modifiers['TickRamp'] = ramp_mod
+            dmg_mod *= ramp_mod
+
         apply_mastery = mastery_override if mastery_override is not None else (
             self.is_channeled and player.channel_mastery_snapshot)
         if apply_mastery:
-            dmg_mod *= (1.0 + player.mastery)
-        dmg_mod *= (1.0 + player.versatility)
+            m_mod = (1.0 + player.mastery)
+            modifiers['Mastery'] = m_mod
+            dmg_mod *= m_mod
+            flags.append('Mastery')
+
+        v_mod = (1.0 + player.versatility)
+        modifiers['Vers'] = v_mod
+        dmg_mod *= v_mod
+
         crit_chance = min(1.0, player.crit + self.bonus_crit_chance)
         crit_mult = 2.0 + self.crit_damage_bonus
-        expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
-        log_details = {
-            "Base": base_dmg,
-            "Dmg Mod": dmg_mod,
-            "Crit%": crit_chance,
-            "Crit Mult": crit_mult,
-            "Expected DMG": expected_dmg
+
+        is_crit = random.random() < crit_chance
+        # Deterministic Calculation requested previously,
+        # but Sandbox Task 1 says "Detailed Breakdown (Base, Mod, Crit etc)".
+        # Task 3 says breakdown should be struct dict.
+        # The prompt says "E[D] formula ... replacing random critical strike rolls." in Memory.
+        # But for Sandbox, usually people want to see hits.
+        # However, I should stick to Expected Damage logic if that's the core rule,
+        # OR since the user said "Breakdown ... {'Vers': 1.09, 'Crit': 2.0}",
+        # implying Crit is a modifier (Multiplier) in the breakdown.
+
+        # Let's keep Expected Damage logic as per memory and previous implementation.
+        # E[D] = (Base * Mod) * (1 + Chance * (Mult - 1))
+
+        crit_impact = (1 + (crit_chance * (crit_mult - 1)))
+        modifiers['Crit_Exp'] = crit_impact
+
+        expected_dmg = (base_dmg * dmg_mod) * crit_impact
+
+        breakdown = {
+            'base': base_dmg,
+            'modifiers': modifiers,
+            'flags': flags,
+            'crit_chance': crit_chance,
+            'crit_mult': crit_mult,
+            'final_damage': expected_dmg
         }
-        return expected_dmg, log_details
+
+        return expected_dmg, breakdown
 
     def tick_cd(self, dt):
         if self.charges < self.max_charges:
@@ -220,20 +309,19 @@ class SpellBook:
             active_talents = talents
 
         # 基础伤害系数需按实际修改，此处简化
-        # 注意：Zenith 在此被定义，彻底解决 KeyError
         fof_max_ticks = 5
         self.spells = {
-            'TP': Spell('TP', 0.88, energy=50, chi_gen=2, category='Minor Filler'),
-            'BOK': Spell('BOK', 3.56, chi_cost=1, category='Minor Filler'),
-            'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True, category='Major Filler'),
-            'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True, category='Minor Filler'),
-            'FOF': Spell('FOF', 2.07 * fof_max_ticks, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True,
+            'TP': Spell('TP', 0.88, name="Tiger Palm", energy=50, chi_gen=2, category='Minor Filler'),
+            'BOK': Spell('BOK', 3.56, name="Blackout Kick", chi_cost=1, category='Minor Filler'),
+            'RSK': Spell('RSK', 4.228, name="Rising Sun Kick", chi_cost=2, cd=10.0, cd_haste=True, category='Major Filler'),
+            'SCK': Spell('SCK', 3.52, name="Spinning Crane Kick", chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True, category='Minor Filler'),
+            'FOF': Spell('FOF', 2.07 * fof_max_ticks, name="Fists of Fury", chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True,
                          ticks=fof_max_ticks, cast_time=4.0, cast_haste=True, req_talent=True, category='Major Filler'),
-            'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True, category='Minor Cooldown'),
-            'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown'),
-            'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown'),
-            'Xuen': Spell('Xuen', 0.0, cd=120.0, req_talent=True, gcd_override=0.0, category='Major Cooldown'),
-            'Zenith': Spell('Zenith', 0.0, cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown')
+            'WDP': SpellWDP('WDP', 5.40, name="Whirling Dragon Punch", cd=30.0, req_talent=True, category='Minor Cooldown'),
+            'SOTWL': Spell('SOTWL', 15.12, name="Strike of the Windlord", chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown'),
+            'SW': Spell('SW', 8.96, name="Slicing Winds", cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown'),
+            'Xuen': Spell('Xuen', 0.0, name="Invoke Xuen", cd=120.0, req_talent=True, gcd_override=0.0, category='Major Cooldown'),
+            'Zenith': Spell('Zenith', 0.0, name="Zenith", cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown')
         }
         self.spells['TP'].triggers_combat_wisdom = True
         self.spells['BOK'].triggers_sharp_reflexes = True
