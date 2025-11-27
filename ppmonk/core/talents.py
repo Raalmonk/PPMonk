@@ -544,17 +544,11 @@ TALENT_DB = {
     'ShadoPanBase': ShadoPanBaseTalent('Shado-Pan'),
     'PrideOfPandaria': PrideOfPandariaTalent('Pride of Pandaria'),
     'HighImpact': HighImpactTalent('High Impact'),
-    # Individual passives kept for reference, but applied by Base now
-    'VeteransEye': VeteransEyeTalent('Veterans Eye'),
-    'MartialPrecision': MartialPrecisionTalent('Martial Precision'),
-    'ShadoOverTheBattlefield': ShadoOverTheBattlefieldTalent('Shado Over the Battlefield'),
-    'OneVersusMany': OneVersusManyTalent('One Versus Many'),
-    'StandReady': StandReadyTalent('Stand Ready'),
-    'AgainstAllOdds': AgainstAllOddsTalent('Against All Odds'),
-    'EfficientTraining': EfficientTrainingTalent('Efficient Training'),
-    'VigilantWatch': VigilantWatchTalent('Vigilant Watch'),
-    'WeaponsOfTheWall': WeaponsOfTheWallTalent('Weapons of the Wall'),
-    'WisdomOfTheWall': WisdomOfTheWallTalent('Wisdom of the Wall'),
+
+    # New Keys for UI simplified logic
+    'hero-sp-header': ShadoPanBaseTalent('Shado-Pan'),
+    'hero-sp-choice1': PrideOfPandariaTalent('Pride of Pandaria'),
+    'hero-sp-choice1_b': HighImpactTalent('High Impact'),
 
     # Conduit of the Celestials (COTC Hero Talents)
     'COTCBase': COTCBaseTalent('Conduit of the Celestials (Base)'),
@@ -570,13 +564,18 @@ TALENT_DB = {
     'PathOfFallingStar': PathOfFallingStarTalent('Path of the Falling Star'),
     'UnityWithin': UnityWithinTalent('Unity Within'),
 
+    # New Keys for UI simplified logic
+    'hero-cotc-header': COTCBaseTalent('Conduit of the Celestials (Base)'),
+    'hero-cotc-choice1': XuensGuidanceTalent('Xuen\'s Guidance'),
+    'hero-cotc-choice1_b': TempleTrainingTalent('Temple Training'),
+    'hero-cotc-choice2': RestoreBalanceTalent('Restore Balance'),
+    'hero-cotc-choice2_b': XuensBondTalent('Xuen\'s Bond'),
+
     # Shortcuts
     'WDP': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
     'SW': UnlockSpellTalent('Slicing Winds', 'SW'),
     'SOTWL': UnlockSpellTalent('Strike of the Windlord', 'SOTWL'),
     'Ascension': AscensionTalent('Ascension'),
-    'hero-sp-header': ShadoPanBaseTalent('Shado-Pan'),
-    'hero-cotc-header': COTCBaseTalent('Conduit of the Celestials (Base)')
 }
 
 class TalentManager:
