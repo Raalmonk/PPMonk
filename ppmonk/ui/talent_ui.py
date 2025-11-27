@@ -198,6 +198,9 @@ class TalentTreeWindow(ctk.CTkToplevel):
         self.geometry("1200x900")
         self.on_close_callback = on_close_callback
 
+        # Hero Talent Selection Variable
+        self.hero_talent_var = tk.StringVar(value="Shado-Pan")
+
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.pack(fill="both", expand=True)
 
@@ -231,6 +234,11 @@ class TalentTreeWindow(ctk.CTkToplevel):
 
         self.info_label = ctk.CTkLabel(self.control_panel, text="Points Spent: 0", font=("Arial", 14, "bold"))
         self.info_label.pack(side="left", padx=20, pady=10)
+
+        # Hero Talent Selection UI
+        ctk.CTkLabel(self.control_panel, text="Hero Tree:", font=("Arial", 12, "bold")).pack(side="left", padx=10)
+        ctk.CTkRadioButton(self.control_panel, text="Shado-Pan", variable=self.hero_talent_var, value="Shado-Pan").pack(side="left", padx=5)
+        ctk.CTkRadioButton(self.control_panel, text="Conduit", variable=self.hero_talent_var, value="Conduit").pack(side="left", padx=5)
 
         save_btn = ctk.CTkButton(self.control_panel, text="Apply & Close", command=self._on_save, fg_color="#1b8f61",
                                  width=150)
@@ -327,6 +335,25 @@ class TalentTreeWindow(ctk.CTkToplevel):
                 final_list.append(nid + "_b")
             else:
                 final_list.append(nid)
+
+        # Inject Hero Talents
+        hero_choice = self.hero_talent_var.get()
+        if hero_choice == "Shado-Pan":
+            # Shado-Pan IDs
+            final_list.extend([
+                'ShadoPanBase', 'PrideOfPandaria', 'HighImpact', 'VeteransEye',
+                'MartialPrecision', 'ShadoOverTheBattlefield', 'OneVersusMany',
+                'StandReady', 'AgainstAllOdds', 'EfficientTraining', 'VigilantWatch',
+                'WeaponsOfTheWall', 'WisdomOfTheWall'
+            ])
+        else:
+             # COTC IDs
+             final_list.extend([
+                'COTCBase', 'CelestialConduit', 'XuensBond', 'HeartOfJadeSerpent',
+                'StrengthOfBlackOx', 'InnerCompass', 'CourageOfWhiteTiger',
+                'XuensGuidance', 'TempleTraining', 'RestoreBalance',
+                'PathOfFallingStar', 'UnityWithin'
+             ])
 
         self.on_close_callback(final_list)
         self.destroy()

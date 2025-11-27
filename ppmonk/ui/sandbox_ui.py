@@ -3,12 +3,13 @@ import datetime
 import tkinter as tk
 from ppmonk.core.player import PlayerState
 from ppmonk.core.spell_book import SpellBook
+import math
 
 class SandboxWindow(ctk.CTkToplevel):
     def __init__(self, parent, active_talents=None):
         super().__init__(parent)
         self.title("Manual Sandbox")
-        self.geometry("1400x800")
+        self.geometry("1400x850")
 
         self.active_talents = active_talents if active_talents else []
 
@@ -28,10 +29,15 @@ class SandboxWindow(ctk.CTkToplevel):
         # Timeline drawing config
         self.pixels_per_second = 50
         self.row_height = 40
-        self.timeline_height = 300
+        self.timeline_height = 400
         self.active_lane_y = 40
-        self.passive_lane_y = 120
+        self.derivative_lane_y = 90
+        self.passive_lane_y = 140
         self.canvas_width = 5000
+
+        # Selection
+        self.selection_start_x = 0
+        self.selection_rect = None
 
         self._build_ui()
         self._reset_sandbox()
@@ -124,6 +130,12 @@ class SandboxWindow(ctk.CTkToplevel):
 
         self._draw_timeline_grid()
 
+        # Marquee Bindings
+        self.canvas.bind("<ButtonPress-3>", self._start_selection)
+        self.canvas.bind("<B3-Motion>", self._update_selection)
+        self.canvas.bind("<ButtonRelease-3>", self._end_selection)
+        # Using Right Click (Button-3) to avoid conflict with tooltip click (Button-1)
+
     def _on_hp_change(self, value):
         self.hp_label.configure(text=f"{int(value*100)}%")
         if self.player:
@@ -169,7 +181,7 @@ class SandboxWindow(ctk.CTkToplevel):
         self.player = PlayerState(agility=agility, target_count=self.target_count.get())
         self.player.target_health_pct = self.target_hp_pct.get()
 
-        # Update default talents to include interesting new ones
+        # Update default talents
         talents_to_use = self.active_talents if self.active_talents else [
             "1-1",
             "2-1", "2-2", "2-3",
@@ -178,7 +190,6 @@ class SandboxWindow(ctk.CTkToplevel):
             "5-1", "5-2", "5-3", "5-4", "5-5", "5-6",
             "6-1", "6-2", "6-2_b",
             "WDP", "SW", "SOTWL",
-            # Enable new stuff for testing
             "8-1", "8-2", "8-3", "8-4", "8-5", "8-5_b", "8-6", "8-7",
             "9-1", "9-2", "9-3", "9-4", "9-5", "9-8",
             "10-2", "10-3", "10-4", "10-5", "10-6", "10-7"
@@ -202,6 +213,7 @@ class SandboxWindow(ctk.CTkToplevel):
             self.canvas.create_text(x + 2, self.timeline_height - 15, text=f"{i}s", anchor="w", fill="white", font=("Arial", 8))
 
         self.canvas.create_text(5, self.active_lane_y - 20, text="Active Spells", anchor="w", fill="#3498DB", font=("Arial", 10, "bold"))
+        self.canvas.create_text(5, self.derivative_lane_y - 20, text="Derivative / Procs", anchor="w", fill="#D4AC0D", font=("Arial", 10, "bold"))
         self.canvas.create_text(5, self.passive_lane_y - 20, text="Passive / Auto Attacks", anchor="w", fill="#95A5A6", font=("Arial", 10, "bold"))
 
         self.time_indicator = self.canvas.create_line(0, 0, 0, self.timeline_height, fill="red", width=2)
@@ -245,6 +257,11 @@ class SandboxWindow(ctk.CTkToplevel):
 
     def _update_button_visual(self, btn):
         key = btn.spell_key
+        # Handle "debug" buttons which might have fake keys?
+        # Actually I will assign spell_key only to main buttons.
+        # But if I iterate children, I need to check.
+        if key not in self.spell_book.spells: return
+
         spell = self.spell_book.spells[key]
 
         is_usable = spell.is_usable(self.player, self.spell_book.spells)
@@ -263,7 +280,7 @@ class SandboxWindow(ctk.CTkToplevel):
 
         # Define spells
         spell_keys = [
-            "TP", "BOK", "RSK", "FOF", "WDP", "SCK", "SOTWL", "SW", "Xuen", "Zenith", "ToD"
+            "TP", "BOK", "RSK", "FOF", "WDP", "SCK", "SOTWL", "SW", "Xuen", "Zenith", "ToD", "Conduit"
         ]
 
         for key in spell_keys:
@@ -278,32 +295,45 @@ class SandboxWindow(ctk.CTkToplevel):
             btn.spell_key = key
             btn.pack(pady=4, padx=5, fill="x")
 
+        # Debug Spells
+        if "RSK" in self.spell_book.spells:
+             ctk.CTkButton(self.spells_frame, text="RSK (Force Glory)", fg_color="#E74C3C",
+                          command=lambda: self._handle_cast_click("RSK", force_glory_override=True)).pack(pady=4, padx=5, fill="x")
+
+        if "BOK" in self.spell_book.spells:
+             ctk.CTkButton(self.spells_frame, text="BOK (Force Reset)", fg_color="#2E86C1",
+                          command=lambda: self._handle_cast_click("BOK", force_reset_override=True)).pack(pady=4, padx=5, fill="x")
+
         # Wait Button
         ctk.CTkButton(self.spells_frame, text="Wait (0.5s)", fg_color="gray",
                       command=lambda: self._advance_simulation(0.5)).pack(pady=20, padx=5, fill="x")
 
-    def _handle_cast_click(self, key):
+    def _handle_cast_click(self, key, force_glory_override=False, force_reset_override=False):
         spell = self.spell_book.spells[key]
 
         if not spell.is_usable(self.player, self.spell_book.spells):
             self._show_rejection_popup(key)
             return
 
-        force_glory = self.force_proc_glory.get()
-        force_reset = self.force_proc_reset.get()
+        force_glory = self.force_proc_glory.get() or force_glory_override
+        force_reset = self.force_proc_reset.get() or force_reset_override
 
         cast_time = spell.get_effective_cast_time(self.player)
-        gcd = 1.5 / (1.0 + self.player.haste)
-        if spell.gcd_override is not None:
-            gcd = spell.gcd_override
+
+        # Use Expected Value Mode
+        dmg, breakdown = spell.cast(self.player, other_spells=self.spell_book.spells,
+                                    force_proc_glory=force_glory, force_proc_reset=force_reset,
+                                    use_expected_value=True)
+
+        # Timing Fix: Use logic time
+        step_duration = self.player.gcd_remaining
+        if cast_time > step_duration:
+             step_duration = cast_time
+
+        # Visual Duration
+        visual_duration = max(step_duration, 0.15)
 
         action_start_time = self.time_elapsed
-
-        dmg, breakdown = spell.cast(self.player, other_spells=self.spell_book.spells,
-                                    force_proc_glory=force_glory, force_proc_reset=force_reset)
-
-        step_duration = max(cast_time, gcd) if cast_time > 0 else gcd
-        if step_duration < 0.1: step_duration = 0.1
 
         color = "#1ABC9C"
         if key == "RSK": color = "#E74C3C"
@@ -314,42 +344,55 @@ class SandboxWindow(ctk.CTkToplevel):
         self._record_and_draw(
             lane_y=self.active_lane_y,
             start_time=action_start_time,
-            duration=step_duration,
+            duration=visual_duration,
             text=key,
             color=color,
             info={"Damage": dmg, "Breakdown": breakdown}
         )
 
+        # Draw Derivative Events
+        if 'extra_events' in breakdown:
+            for extra in breakdown['extra_events']:
+                 self._record_and_draw(
+                    lane_y=self.derivative_lane_y,
+                    start_time=action_start_time,
+                    duration=0.15,
+                    text=extra['name'][:4],
+                    color="#D4AC0D",
+                    info={"Damage": extra['damage'], "Breakdown": extra}
+                 )
+
         self._advance_simulation(step_duration)
 
     def _advance_simulation(self, duration):
         base_time = self.time_elapsed
-        dmg, events = self.player.advance_time(duration)
+        dmg, events = self.player.advance_time(duration, use_expected_value=True)
         self.spell_book.tick(duration)
         self.time_elapsed += duration
 
         for event in events:
-            if event.get('source') == 'passive':
-                evt_time = base_time + event.get('offset', 0.0)
-                name = event.get('Action')
+            evt_time = base_time + event.get('offset', 0.0)
+            name = event.get('Action')
+            dmg_val = event.get('Expected DMG')
 
+            if event.get('source') == 'passive':
+                lane = self.passive_lane_y + (0 if "Auto" in name else 25)
                 self._record_and_draw(
-                    lane_y=self.passive_lane_y + (0 if "Auto" in name else 25),
+                    lane_y=lane,
                     start_time=evt_time,
                     duration=0.1,
                     text=name[0:2],
                     color="#95A5A6",
-                    info={"Damage": event.get('Expected DMG'), "Breakdown": event.get('Breakdown')}
+                    info={"Damage": dmg_val, "Breakdown": event.get('Breakdown')}
                 )
-            elif event.get('source') == 'active':
-                evt_time = base_time + event.get('offset', 0.0)
+            elif event.get('source') == 'active': # Channel Ticks
                 self._record_and_draw(
                     lane_y=self.active_lane_y + 40,
                     start_time=evt_time,
                     duration=0.1,
                     text="Tick",
                     color="#D35400",
-                    info={"Damage": event.get('Expected DMG'), "Breakdown": event.get('Breakdown')}
+                    info={"Damage": dmg_val, "Breakdown": event.get('Breakdown')}
                 )
 
         self._update_status()
@@ -421,6 +464,11 @@ class SandboxWindow(ctk.CTkToplevel):
             text_info += f"\nFinal Crit: {breakdown.get('final_crit', 0)*100:.1f}%\n"
             text_info += f"Crit Mult: {breakdown.get('crit_mult', 2.0):.2f}x\n"
 
+            if 'ev_mode' in breakdown:
+                 text_info += f"EV Mode: {breakdown['ev_mode']}\n"
+                 if breakdown.get('chance'):
+                     text_info += f"Proc Chance: {breakdown['chance']*100:.1f}%\n"
+
             if 'aoe_type' in breakdown:
                  text_info += f"\nAOE Type: {breakdown['aoe_type']}\n"
                  text_info += f"Targets: {breakdown.get('targets')}\n"
@@ -434,11 +482,81 @@ class SandboxWindow(ctk.CTkToplevel):
             if 'extra_events' in breakdown:
                 text_info += "\nExtra Events:\n"
                 for extra in breakdown['extra_events']:
-                    text_info += f"  - {extra['name']}: {int(extra['damage'])} (Crit: {extra.get('crit')})\n"
+                    text_info += f"  - {extra['name']}: {int(extra['damage'])} (EV Mode: {extra.get('ev_mode', False)})\n"
         else:
             text_info = str(breakdown)
 
         textbox = ctk.CTkTextbox(top, width=380, height=220)
+        textbox.pack(pady=10)
+        textbox.insert("1.0", text_info)
+        textbox.configure(state="disabled")
+
+    # Marquee Selection Implementation
+    def _start_selection(self, event):
+        self.selection_start_x = self.canvas.canvasx(event.x)
+        if self.selection_rect:
+            self.canvas.delete(self.selection_rect)
+        self.selection_rect = self.canvas.create_rectangle(self.selection_start_x, 0, self.selection_start_x, self.timeline_height, fill="white", stipple="gray25", outline="")
+
+    def _update_selection(self, event):
+        cur_x = self.canvas.canvasx(event.x)
+        self.canvas.coords(self.selection_rect, self.selection_start_x, 0, cur_x, self.timeline_height)
+
+    def _end_selection(self, event):
+        end_x = self.canvas.canvasx(event.x)
+        start_time = min(self.selection_start_x, end_x) / self.pixels_per_second
+        end_time = max(self.selection_start_x, end_x) / self.pixels_per_second
+
+        if end_time - start_time < 0.1: # Click, not drag
+             self.canvas.delete(self.selection_rect)
+             self.selection_rect = None
+             return
+
+        self._calculate_selection_stats(start_time, end_time)
+
+        self.canvas.delete(self.selection_rect)
+        self.selection_rect = None
+
+    def _calculate_selection_stats(self, start, end):
+        total_dmg = 0
+        breakdown = {}
+
+        for evt in self.event_history:
+            # Check midpoint? or any overlap?
+            # Prompt says "selected time window". Usually means events starting in window.
+            t = evt['start_time']
+            if start <= t <= end:
+                 d = evt['info'].get('Damage', 0)
+                 total_dmg += d
+                 name = evt['text']
+                 breakdown[name] = breakdown.get(name, 0) + d
+
+        duration = end - start
+        dps = total_dmg / duration if duration > 0 else 0
+
+        self._show_selection_popup(total_dmg, dps, duration, breakdown)
+
+    def _show_selection_popup(self, total_dmg, dps, duration, breakdown):
+        top = ctk.CTkToplevel(self)
+        top.title("Selection Analysis")
+        top.geometry("400x500")
+
+        ctk.CTkLabel(top, text="Selection Stats", font=("Arial", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(top, text=f"Time: {duration:.2f}s", font=("Arial", 12)).pack()
+        ctk.CTkLabel(top, text=f"Total EV Damage: {int(total_dmg)}", font=("Arial", 14, "bold"), text_color="#E67E22").pack(pady=5)
+        ctk.CTkLabel(top, text=f"DPS: {int(dps)}", font=("Arial", 14, "bold"), text_color="#27AE60").pack(pady=5)
+
+        ctk.CTkLabel(top, text="Breakdown:", font=("Arial", 12, "bold")).pack(pady=5)
+
+        # Sort breakdown
+        sorted_bd = sorted(breakdown.items(), key=lambda x: x[1], reverse=True)
+
+        text_info = ""
+        for name, dmg in sorted_bd:
+            pct = (dmg / total_dmg * 100) if total_dmg > 0 else 0
+            text_info += f"{name}: {int(dmg)} ({pct:.1f}%)\n"
+
+        textbox = ctk.CTkTextbox(top, width=380, height=300)
         textbox.pack(pady=10)
         textbox.insert("1.0", text_info)
         textbox.configure(state="disabled")

@@ -8,11 +8,9 @@ class PlayerState:
         self.rating_vers = rating_vers
         self.agility = agility
 
-        # [Task 4] 基础 AP = 敏捷
         self.weapon_type = weapon_type  # '2h' or 'dw'
         self.attack_power = agility
 
-        # [Task 2] 生命值与目标
         self.max_health = max_health
         self.target_health_pct = 1.0
         self.target_count = max(1, target_count)
@@ -74,7 +72,6 @@ class PlayerState:
         self.has_weapon_of_wind = False
         self.has_jadefire_stomp = False
 
-        # [Task 1] TEB & Martial Agility
         self.teb_stacks = 10
         self.teb_timer = 8.0
         self.teb_active_bonus = 0.0
@@ -82,7 +79,6 @@ class PlayerState:
         self.has_teb_stacking = False
         self.has_martial_agility = False
 
-        # [Task 2] New Talent Flags
         self.has_path_of_jade = False
         self.has_singularly_focused_jade = False
         self.has_flurry_of_xuen = False
@@ -130,7 +126,6 @@ class PlayerState:
         self.has_path_of_falling_star = False
         self.has_unity_within = False
 
-        # [Task 2] Core Buffs
         self.totm_stacks = 0
         self.max_totm_stacks = 4
 
@@ -187,7 +182,6 @@ class PlayerState:
         raw_haste = (self.rating_haste / 4400.0)
 
         if self.has_cyclones_drift:
-            # Cyclones Drift logic from previous code
             self.haste = raw_haste * 1.10
         else:
             self.haste = raw_haste
@@ -216,7 +210,7 @@ class PlayerState:
         if self.has_inner_compass and self.inner_compass_state == 3:
             self.mastery += 0.02
 
-    def advance_time(self, duration, damage_meter=None):
+    def advance_time(self, duration, damage_meter=None, use_expected_value=False):
         total_damage = 0
         dt = 0.01
         elapsed = 0.0
@@ -225,35 +219,30 @@ class PlayerState:
 
         while elapsed < duration:
             step = min(dt, duration - elapsed)
-            self.simulation_time += step # [COTC] Time tracking
+            self.simulation_time += step
 
-            # [COTC] Jade Serpent CDR
             if self.jade_serpent_cdr_active:
                 self.jade_serpent_cdr_duration -= step
                 if self.jade_serpent_cdr_duration <= 0:
                     self.jade_serpent_cdr_active = False
                     self.cooldown_recovery_rate = 1.0
 
-            # [COTC] Conduit Window
             if self.conduit_window_timer > 0:
                 self.conduit_window_timer -= step
                 if self.conduit_window_timer <= 0:
                     self.can_cast_conduit = False
 
-            # [COTC] Cleanup Damage History
             while self.recent_damage_window and self.recent_damage_window[0][0] <= self.simulation_time - 4.0:
                 self.recent_damage_window.pop(0)
 
             self.energy = min(self.max_energy, self.energy + regen_rate * step)
 
-            # [Task 1] TEB Stacking
             if self.has_teb_stacking:
                 self.teb_timer -= step
                 if self.teb_timer <= 0:
                     self.teb_stacks = min(20, self.teb_stacks + 1)
                     self.teb_timer += 8.0
 
-            # ICD Timers
             if self.thunderfist_icd_timer > 0:
                 self.thunderfist_icd_timer -= step
 
@@ -270,8 +259,7 @@ class PlayerState:
                     self.xuen_active = False
                     self.update_stats()
 
-                # [COTC] Xuen Lightning Logic
-                if self.has_cotc_base: # Assuming these features are part of COTC package
+                if self.has_cotc_base:
                     # Tiger Lightning
                     self.xuen_lightning_timer -= step
                     if self.xuen_lightning_timer <= 0:
@@ -285,10 +273,12 @@ class PlayerState:
                         if self.has_restore_balance:
                             tl_mod *= 1.05
 
-                        # Crit
                         crit_m = 2.0
-                        if random.random() < self.crit:
-                             tl_mod *= crit_m
+                        if use_expected_value:
+                             tl_mod *= (1 + (self.crit * (crit_m - 1)))
+                        else:
+                             if random.random() < self.crit:
+                                 tl_mod *= crit_m
 
                         tl_total = tl_base * tl_mod * tl_targets
                         total_damage += tl_total
@@ -308,19 +298,7 @@ class PlayerState:
                         self.xuen_empowered_timer += 4.0
                         recent = self.get_damage_last_4s()
                         el_base = recent * 0.08
-
-                        # Apply Nature/Vers?
-                        # "Deals 8% of damage in last 4s". Usually this is the final value.
-                        # But it's Nature damage, so maybe it bypasses armor if source was physical.
-                        # Does it scale with Vers/UE again?
-                        # Usually "Stored Damage" mechanics do not double dip modifiers unless stated.
-                        # But if it's "Nature Damage equal to 8%...", it might get nature buffs.
-                        # I will assume NO double dipping for safety, except maybe Universal Energy if strict Nature check.
-                        # But let's keep it simple: Raw 8%.
-
                         el_total = el_base
-                        # If I want to be generous:
-                        # el_total *= (1.0 + self.versatility)
 
                         total_damage += el_total
                         self.record_damage(el_total)
@@ -356,7 +334,6 @@ class PlayerState:
                 if self.momentum_buff_active:
                     swing_speed_mod *= 1.6
 
-                # [Task 1] Martial Agility
                 if self.has_martial_agility:
                     ma_mod = 1.3
                     if self.zenith_active:
@@ -373,45 +350,72 @@ class PlayerState:
                     self.thunderfist_stacks -= 1
                     self.thunderfist_icd_timer = 1.5
                     thunderfist_proc = True
-                    # Thunderfist Damage: 1.61 * AP * Agility (Nature)
                     tf_base = 1.61 * self.attack_power * self.agility
 
-                is_dual_threat = self.has_dual_threat and random.random() < 0.30
+                is_dual_threat = False
+                if self.has_dual_threat:
+                    if use_expected_value:
+                        # Dual threat is 30% chance.
+                        # Do we average the coeff?
+                        # Normal coeff is say 1.8. Dual threat is 3.726.
+                        # If EV mode, maybe use weighted average coeff?
+                        # But Dual Threat changes the NAME of the event too.
+                        # Let's keep it separate or assume no proc but log Expected Extra?
+                        # Or simple: if EV mode, we just assume "Auto Attack" but boosted by expected value of Dual Threat?
+                        # Weighted Average Coeff = (0.7 * Normal) + (0.3 * DualThreat)
+                        # Let's do that for cleanliness in EV mode.
+                        pass
+                    else:
+                        is_dual_threat = random.random() < 0.30
 
                 coeff = 1.0
-                if is_dual_threat:
-                    coeff = 3.726
-                elif self.weapon_type == '2h':
+                if self.weapon_type == '2h':
                     coeff = 2.40
                 else:
-                    coeff = 1.80
+                    coeff = 1.80 # DW
 
-                # [Task 4] Apply Agility Multiplier
-                base_dmg = coeff * self.attack_power * self.agility
+                dual_coeff = 3.726
+
+                final_coeff = coeff
+                if use_expected_value and self.has_dual_threat:
+                     # Weighted Average
+                     final_coeff = (0.7 * coeff) + (0.3 * dual_coeff)
+                elif is_dual_threat:
+                     final_coeff = dual_coeff
+
+                base_dmg = final_coeff * self.attack_power * self.agility
 
                 crit_chance = self.crit
                 crit_mult = 2.0
                 dmg_mod = 1.0 + self.versatility
 
-                # [COTC] Restore Balance
                 if self.has_restore_balance and self.xuen_active:
                     dmg_mod *= 1.05
 
                 if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
                     dmg_mod *= 1.10
 
-                expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
+                if use_expected_value:
+                    expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
+                else:
+                     is_crit = random.random() < crit_chance
+                     expected_dmg = (base_dmg * dmg_mod) * (crit_mult if is_crit else 1.0)
+                     if is_crit: crit_chance = 1.0 # For display
+
                 total_damage += expected_dmg
-                self.record_damage(expected_dmg) # [COTC]
+                self.record_damage(expected_dmg)
 
                 key = "Dual Threat" if is_dual_threat else "Auto Attack"
+                if use_expected_value and self.has_dual_threat:
+                     key = "Auto Attack (EV w/ DT)"
+
                 if damage_meter is not None:
                     damage_meter[key] = damage_meter.get(key, 0) + expected_dmg
 
                 breakdown = {
                     'base': int(base_dmg),
                     'modifiers': ['Versatility: x%.2f' % (1.0 + self.versatility)],
-                    'crit_sources': ['Base: %.1f%%' % (crit_chance*100)],
+                    'crit_sources': ['Base: %.1f%%' % (self.crit*100)],
                     'final_crit': crit_chance,
                     'crit_mult': crit_mult
                 }
@@ -431,17 +435,24 @@ class PlayerState:
                 if self.has_shado_pan_base:
                     proc_chance = 1.0
                     if self.weapon_type == 'dw':
-                        # 17.14 * 2.6 / 60 = 0.7427
                         proc_chance = (17.14 * 2.6) / 60.0
+
+                    if use_expected_value:
+                        # Do we add partial stacks?
+                        # Stacks are discrete.
+                        # Maybe we don't add stacks in EV mode?
+                        # But then we never trigger Flurry.
+                        # This is the "State vs EV" problem.
+                        # For now, let's keep rolling for Stacks even in EV mode,
+                        # because Flurry Charges are a Resource, not just direct damage.
+                        # (Similar to Chi)
+                        # So: Random State, Deterministic Damage.
+                        pass
 
                     if random.random() < proc_chance:
                         stacks_to_add = 1
-                        # One Versus Many: Crit AA gives 2 stacks
-                        # We use 'crit_chance' as probability for this
                         if self.has_one_versus_many and random.random() < crit_chance:
                             stacks_to_add = 2
-
-                        # Removed limit check: min(self.max_flurry_charges, ...)
                         self.flurry_charges += stacks_to_add
 
                 # [Shado-Pan] Stand Ready Trigger
@@ -452,32 +463,29 @@ class PlayerState:
                     self.flurry_charges = 0
 
                     if stacks > 0:
-                        # Logic duplicated from SpellBook implementation plan to avoid circular import
-                        # Flurry Base: 0.6 * AP
                         flurry_coeff = 0.6
                         flurry_base = flurry_coeff * self.attack_power * self.agility * stacks
 
-                        # Apply Physical Mitigation
                         mitigation = self.get_physical_mitigation()
                         flurry_base *= mitigation
 
-                        # Modifiers
                         f_mod = 1.0 + self.versatility
 
                         if self.has_restore_balance and self.xuen_active:
                             f_mod *= 1.05
-
-                        # Stand Ready Scale: 0.7
                         f_mod *= 0.7
 
-                        # Pride of Pandaria
                         flurry_crit = self.crit
                         if self.has_pride_of_pandaria:
                             flurry_crit += 0.15
 
-                        flurry_dmg = flurry_base * f_mod * (1 + (flurry_crit * (crit_mult - 1)))
+                        if use_expected_value:
+                             flurry_dmg = flurry_base * f_mod * (1 + (flurry_crit * (crit_mult - 1)))
+                        else:
+                             flurry_dmg = flurry_base * f_mod * (1 + (flurry_crit * (crit_mult - 1)))
+
                         total_damage += flurry_dmg
-                        self.record_damage(flurry_dmg) # [COTC]
+                        self.record_damage(flurry_dmg)
 
                         if damage_meter is not None:
                             damage_meter['Flurry Strikes'] = damage_meter.get('Flurry Strikes', 0) + flurry_dmg
@@ -494,27 +502,27 @@ class PlayerState:
                             "offset": elapsed
                         })
 
-                        # Shado Over Battlefield (Nature AOE)
                         if self.has_shado_over_battlefield:
                             sob_coeff = 0.52
                             sob_base = sob_coeff * self.attack_power * self.agility * stacks
-                            # Nature -> No Armor Pen, but Universal Energy applies
                             sob_mod = 1.0 + self.versatility
                             if getattr(self, 'has_universal_energy', False):
                                 sob_mod *= 1.15
                             if self.has_restore_balance and self.xuen_active:
                                 sob_mod *= 1.05
 
-                            # Soft Cap 8
                             eff_targets = self.target_count
                             scale = 1.0
                             if eff_targets > 8:
                                 scale = (8.0 / eff_targets) ** 0.5
 
-                            sob_total = sob_base * sob_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+                            if use_expected_value:
+                                sob_total = sob_base * sob_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+                            else:
+                                sob_total = sob_base * sob_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
 
                             total_damage += sob_total
-                            self.record_damage(sob_total) # [COTC]
+                            self.record_damage(sob_total)
 
                             if damage_meter is not None:
                                 damage_meter['Shado Over Battlefield'] = damage_meter.get('Shado Over Battlefield', 0) + sob_total
@@ -526,7 +534,6 @@ class PlayerState:
                                 "offset": elapsed
                             })
 
-                        # High Impact (Physical AOE)
                         if self.has_high_impact:
                             hi_coeff = 1.0
                             hi_base = hi_coeff * self.attack_power * self.agility * stacks
@@ -535,15 +542,18 @@ class PlayerState:
                             if self.has_restore_balance and self.xuen_active:
                                 hi_mod *= 1.05
 
-                            # Soft Cap 8
                             eff_targets = self.target_count
                             scale = 1.0
                             if eff_targets > 8:
                                 scale = (8.0 / eff_targets) ** 0.5
 
-                            hi_total = hi_base * hi_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+                            if use_expected_value:
+                                hi_total = hi_base * hi_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+                            else:
+                                hi_total = hi_base * hi_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+
                             total_damage += hi_total
-                            self.record_damage(hi_total) # [COTC]
+                            self.record_damage(hi_total)
 
                             if damage_meter is not None:
                                 damage_meter['High Impact'] = damage_meter.get('High Impact', 0) + hi_total
@@ -551,8 +561,6 @@ class PlayerState:
 
                 # Handle Thunderfist Event
                 if thunderfist_proc:
-                    # Thunderfist Logic
-                    # Nature Damage
                     tf_mod = 1.0 + self.versatility
                     if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
                         tf_mod *= 1.10
@@ -560,14 +568,20 @@ class PlayerState:
                     if self.has_restore_balance and self.xuen_active:
                         tf_mod *= 1.05
 
-                    # Universal Energy (8-6): Magic dmg +15%
                     if getattr(self, 'has_universal_energy', False):
                         tf_mod *= 1.15
 
                     tf_crit = self.crit
-                    tf_expected = (tf_base * tf_mod) * (1 + (tf_crit * (crit_mult - 1)))
+
+                    if use_expected_value:
+                        tf_expected = (tf_base * tf_mod) * (1 + (tf_crit * (crit_mult - 1)))
+                    else:
+                        is_crit = random.random() < tf_crit
+                        tf_expected = (tf_base * tf_mod) * (crit_mult if is_crit else 1.0)
+                        if is_crit: tf_crit = 1.0
+
                     total_damage += tf_expected
-                    self.record_damage(tf_expected) # [COTC]
+                    self.record_damage(tf_expected)
 
                     if damage_meter is not None:
                         damage_meter['Thunderfist'] = damage_meter.get('Thunderfist', 0) + tf_expected
@@ -575,7 +589,7 @@ class PlayerState:
                     tf_breakdown = {
                         'base': int(tf_base),
                         'modifiers': ['Versatility: x%.2f' % (1.0 + self.versatility)],
-                        'crit_sources': ['Base: %.1f%%' % (tf_crit*100)],
+                        'crit_sources': ['Base: %.1f%%' % (self.crit*100)],
                         'final_crit': tf_crit,
                         'crit_mult': crit_mult
                     }
@@ -597,9 +611,9 @@ class PlayerState:
                     if self.channel_ticks_remaining > 0:
                         spell = self.current_channel_spell
                         tick_idx = spell.total_ticks - self.channel_ticks_remaining
-                        tick_dmg, breakdown = spell.calculate_tick_damage(self, tick_idx=tick_idx)
+                        tick_dmg, breakdown = spell.calculate_tick_damage(self, tick_idx=tick_idx, use_expected_value=use_expected_value)
                         total_damage += tick_dmg
-                        self.record_damage(tick_dmg) # [COTC]
+                        self.record_damage(tick_dmg)
 
                         if damage_meter is not None and spell:
                             damage_meter[spell.abbr] = damage_meter.get(spell.abbr, 0) + tick_dmg
@@ -617,13 +631,7 @@ class PlayerState:
                 if self.channel_time_remaining <= 1e-6 or self.channel_ticks_remaining <= 0:
                     # [COTC] Conduit Finish: Unity Within
                     if self.current_channel_spell.abbr == 'Conduit' and self.has_unity_within:
-                         # Burst: 200% of effect (implied simple burst)
-                         # Let's assume it's a final damage event similar to a tick but 2x?
-                         # Or a specific burst calculation.
-                         # "Auto trigger burst, deal 200% effect damage".
-                         # I will calculate it as 2 * Single Tick Damage.
-                         # Use calculate_tick_damage again.
-                         tick_dmg, breakdown = self.current_channel_spell.calculate_tick_damage(self, tick_idx=0)
+                         tick_dmg, breakdown = self.current_channel_spell.calculate_tick_damage(self, tick_idx=0, use_expected_value=use_expected_value)
                          burst_dmg = tick_dmg * 2.0
                          total_damage += burst_dmg
                          self.record_damage(burst_dmg)
@@ -638,31 +646,24 @@ class PlayerState:
                             "source": "passive",
                             "offset": elapsed
                         })
-                         # Trigger Compass? "Celestial Assistance" triggers on CAST, not end.
 
 
                     if self.current_channel_spell.abbr == 'FOF':
-                         # Momentum Boost
                         if self.has_momentum_boost:
                             self.momentum_buff_active = True
                             self.momentum_buff_duration = 8.0
 
-                        # [Task 3] Jadefire Stomp (9-8)
                         if getattr(self, 'has_jadefire_stomp', False):
-                            # Trigger AOE: 0.4 * AP * Agility, Soft Cap 5
-                            # This is a one-off event at end of channel
                             jf_base = 0.4 * self.attack_power * self.agility
 
-                            # Mods
                             jf_mod = 1.0 + self.versatility
                             if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
                                 jf_mod *= 1.10
                             if getattr(self, 'has_universal_energy', False):
-                                jf_mod *= 1.15 # Nature
+                                jf_mod *= 1.15
                             if self.has_restore_balance and self.xuen_active:
                                 jf_mod *= 1.05
 
-                            # [Task 2] Path of Jade / Singularly Focused Jade
                             eff_target_count = self.target_count
                             poj_bonus = 0.0
                             if getattr(self, 'has_path_of_jade', False):
@@ -670,18 +671,20 @@ class PlayerState:
                                 jf_mod *= (1.0 + poj_bonus)
 
                             if getattr(self, 'has_singularly_focused_jade', False):
-                                jf_mod *= 4.0 # Base + 300%
+                                jf_mod *= 4.0
                                 eff_target_count = 1
 
-                            # Soft Cap (Manual Imp)
                             scale = 1.0
                             if eff_target_count > 5:
                                 scale = (5.0 / eff_target_count) ** 0.5
 
-                            jf_total = jf_base * jf_mod * eff_target_count * scale * (1 + (self.crit * (crit_mult - 1)))
+                            if use_expected_value:
+                                jf_total = jf_base * jf_mod * eff_target_count * scale * (1 + (self.crit * (crit_mult - 1)))
+                            else:
+                                jf_total = jf_base * jf_mod * eff_target_count * scale * (1 + (self.crit * (crit_mult - 1)))
 
                             total_damage += jf_total
-                            self.record_damage(jf_total) # [COTC]
+                            self.record_damage(jf_total)
 
                             if damage_meter is not None:
                                 damage_meter['Jadefire Stomp'] = damage_meter.get('Jadefire Stomp', 0) + jf_total
