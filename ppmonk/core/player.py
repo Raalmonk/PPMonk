@@ -66,11 +66,10 @@ class PlayerState:
         self.has_shadowboxing = False
         self.has_dance_of_chiji = False
         self.has_energy_burst = False
-        self.has_obsidian_spiral = False # Added missing flag init
+        self.has_obsidian_spiral = False
         self.has_combo_breaker = False
         self.has_drinking_horn_cover = False
 
-        # Missing from refactor pass 1 but needed for checks
         self.has_universal_energy = False
         self.has_weapon_of_wind = False
         self.has_jadefire_stomp = False
@@ -88,21 +87,37 @@ class PlayerState:
         self.has_singularly_focused_jade = False
         self.has_flurry_of_xuen = False
 
+        # [Shado-Pan] Flags & Stats
+        self.armor_pen = 0.0
+        self.flurry_charges = 0
+        # self.max_flurry_charges = 10  # Removed upper limit
+        self.stand_ready_active = False
+
+        self.has_shado_pan_base = False
+        self.has_pride_of_pandaria = False
+        self.has_high_impact = False
+        self.has_shado_over_battlefield = False
+        self.has_one_versus_many = False
+        self.has_stand_ready = False
+        self.has_weapons_of_the_wall = False
+        self.has_wisdom_of_the_wall = False
+        self.has_veterans_eye = False
+
         # [Task 2] Core Buffs
         self.totm_stacks = 0
-        self.max_totm_stacks = 4 # Default 4
+        self.max_totm_stacks = 4
 
         self.hit_combo_stacks = 0
 
-        self.combo_breaker_stacks = 0 # BOK! Buff
+        self.combo_breaker_stacks = 0
 
         self.dance_of_chiji_stacks = 0
         self.dance_of_chiji_duration = 0.0
 
         self.thunderfist_stacks = 0
-        self.thunderfist_icd_timer = 0.0 # Initialized here as requested
+        self.thunderfist_icd_timer = 0.0
 
-        self.rwk_ready = False # Rushing Wind Kick Ready
+        self.rwk_ready = False
 
         # 自动攻击计时器
         self.swing_timer = 0.0
@@ -112,6 +127,12 @@ class PlayerState:
             self.base_swing_time = 2.6
 
         self.update_stats()
+
+    def get_physical_mitigation(self):
+        # Boss physical DR = 30%
+        # Effective DR = 0.30 * (1 - armor_pen)
+        effective_dr = 0.30 * (1.0 - self.armor_pen)
+        return 1.0 - effective_dr
 
     def update_stats(self):
         raw_crit = (self.rating_crit / 4600.0) + self.base_crit
@@ -123,10 +144,16 @@ class PlayerState:
         self.versatility = (self.rating_vers / 5400.0)
 
         raw_haste = (self.rating_haste / 4400.0)
+
         if self.has_cyclones_drift:
+            # Cyclones Drift logic from previous code
             self.haste = raw_haste * 1.10
         else:
             self.haste = raw_haste
+
+        # Veterans Eye
+        if self.has_veterans_eye:
+             self.haste += 0.05
 
         dr_threshold = 1380
         eff_mast_rating = self.rating_mastery
@@ -202,7 +229,6 @@ class PlayerState:
                 self.swing_timer += self.base_swing_time / swing_speed_mod
 
                 # [Task 3 & 2] Thunderfist Consumption on Auto Attack
-                # "如果 stacks > 0 且 now - last_consume > 1.5" -> Using timer approach
                 thunderfist_dmg = 0.0
                 thunderfist_proc = False
 
@@ -210,11 +236,8 @@ class PlayerState:
                     self.thunderfist_stacks -= 1
                     self.thunderfist_icd_timer = 1.5
                     thunderfist_proc = True
-
                     # Thunderfist Damage: 1.61 * AP * Agility (Nature)
-                    # Task 4: All damage * Agility
                     tf_base = 1.61 * self.attack_power * self.agility
-
 
                 is_dual_threat = self.has_dual_threat and random.random() < 0.30
 
@@ -233,7 +256,6 @@ class PlayerState:
                 crit_mult = 2.0
                 dmg_mod = 1.0 + self.versatility
 
-                # Weapon of the Wind (9-5): +10% all dmg if zenith_active
                 if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
                     dmg_mod *= 1.10
 
@@ -262,6 +284,138 @@ class PlayerState:
                     "source": "passive",
                     "offset": elapsed
                 })
+
+                # [Shado-Pan] Flurry Strikes Stacking
+                if self.has_shado_pan_base:
+                    proc_chance = 1.0
+                    if self.weapon_type == 'dw':
+                        # 17.14 * 2.6 / 60 = 0.7427
+                        proc_chance = (17.14 * 2.6) / 60.0
+
+                    if random.random() < proc_chance:
+                        stacks_to_add = 1
+                        # One Versus Many: Crit AA gives 2 stacks
+                        # We use 'crit_chance' as probability for this
+                        if self.has_one_versus_many and random.random() < crit_chance:
+                            stacks_to_add = 2
+
+                        # Removed limit check: min(self.max_flurry_charges, ...)
+                        self.flurry_charges += stacks_to_add
+
+                # [Shado-Pan] Stand Ready Trigger
+                if self.stand_ready_active:
+                    self.stand_ready_active = False
+                    # Trigger Flurry Logic: 0.7 * (0.6 * AP)
+                    # Flurry Base per stack = 0.6 * AP * Agility
+                    # Scale = 0.7
+                    # This consumes ALL stacks. Wait, "Consume all stacks" is part of FOF.
+                    # Stand Ready says: "Immediate trigger Flurry Strikes logic (consume all stacks cause damage)".
+                    # So we use current stacks.
+
+                    stacks = self.flurry_charges
+                    self.flurry_charges = 0
+
+                    if stacks > 0:
+                        # Logic duplicated from SpellBook implementation plan to avoid circular import
+                        # Flurry Base: 0.6 * AP
+                        flurry_coeff = 0.6
+                        flurry_base = flurry_coeff * self.attack_power * self.agility * stacks
+
+                        # Apply Physical Mitigation
+                        mitigation = self.get_physical_mitigation()
+                        flurry_base *= mitigation
+
+                        # Modifiers
+                        f_mod = 1.0 + self.versatility
+
+                        # Stand Ready Scale: 0.7
+                        f_mod *= 0.7
+
+                        # Pride of Pandaria
+                        flurry_crit = self.crit
+                        if self.has_pride_of_pandaria:
+                            flurry_crit += 0.15
+
+                        flurry_dmg = flurry_base * f_mod * (1 + (flurry_crit * (crit_mult - 1)))
+                        total_damage += flurry_dmg
+
+                        if damage_meter is not None:
+                            damage_meter['Flurry Strikes'] = damage_meter.get('Flurry Strikes', 0) + flurry_dmg
+
+                        log_entries.append({
+                            "Action": f"Flurry Strikes (Stand Ready) x{stacks}",
+                            "Expected DMG": flurry_dmg,
+                            "Breakdown": {
+                                "base": int(flurry_base),
+                                "modifiers": ["StandReady: x0.7", f"Mitigation: x{mitigation:.2f}"],
+                                "final_crit": flurry_crit
+                            },
+                            "source": "passive",
+                            "offset": elapsed
+                        })
+
+                        # Shado Over Battlefield (Nature AOE)
+                        if self.has_shado_over_battlefield:
+                            # 0.52 * AP * Agility per stack? No, "Attach to Flurry Strikes".
+                            # Usually procs per event or per stack? "Every time Flurry Strikes deals damage".
+                            # Usually means 1 proc per "Flurry Strikes" event. But FOF deals it per stack?
+                            # Prompt: "每当 Flurry Strikes 造成伤害时... 额外造成 0.52 * AP".
+                            # Does it mean per stack?
+                            # FOF says: "Trigger Flurry Strikes damage: per stack 0.6 * AP".
+                            # So if I have 10 stacks, I do 10x (0.6 AP).
+                            # Does Shado Over Battlefield trigger 10x? Or 1x?
+                            # "Attach to Flurry Strikes... additional 0.52 AP".
+                            # If it's attached to the *Strike*, and we do 10 Strikes (one per charge), then yes, 10x.
+                            # So effectively, it makes Flurry 0.6 Physical + 0.52 Nature.
+
+                            sob_coeff = 0.52
+                            sob_base = sob_coeff * self.attack_power * self.agility * stacks
+                            # Nature -> No Armor Pen, but Universal Energy applies
+                            sob_mod = 1.0 + self.versatility
+                            if getattr(self, 'has_universal_energy', False):
+                                sob_mod *= 1.15
+
+                            # Soft Cap 8
+                            eff_targets = self.target_count
+                            scale = 1.0
+                            if eff_targets > 8:
+                                scale = (8.0 / eff_targets) ** 0.5
+
+                            sob_total = sob_base * sob_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+
+                            total_damage += sob_total
+                            if damage_meter is not None:
+                                damage_meter['Shado Over Battlefield'] = damage_meter.get('Shado Over Battlefield', 0) + sob_total
+
+                            log_entries.append({
+                                "Action": "Shado Over Battlefield",
+                                "Expected DMG": sob_total,
+                                "source": "passive",
+                                "offset": elapsed
+                            })
+
+                        # High Impact (Physical AOE)
+                        if self.has_high_impact:
+                            # 1.0 * AP * Agility (Explosion)
+                            # Per stack? Or per event?
+                            # "When Flurry Strikes triggers, extra 1.0 AP (Explosion)".
+                            # Assuming per stack for now as it makes sense if Flurry is a stack-based attack.
+                            hi_coeff = 1.0
+                            hi_base = hi_coeff * self.attack_power * self.agility * stacks
+
+                            hi_mod = 1.0 + self.versatility
+
+                            # Soft Cap 8
+                            eff_targets = self.target_count
+                            scale = 1.0
+                            if eff_targets > 8:
+                                scale = (8.0 / eff_targets) ** 0.5
+
+                            hi_total = hi_base * hi_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+                            total_damage += hi_total
+                            if damage_meter is not None:
+                                damage_meter['High Impact'] = damage_meter.get('High Impact', 0) + hi_total
+
 
                 # Handle Thunderfist Event
                 if thunderfist_proc:
