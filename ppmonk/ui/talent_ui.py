@@ -1,13 +1,13 @@
 import customtkinter as ctk
 import tkinter as tk
 
-# Task 3: Hero Talent Tree Visualization
-CANVAS_WIDTH = 1600
-CANVAS_HEIGHT = 1800 # Increased height for Hero Talents
+# Task 2: Talent Tree Refactor
+CANVAS_WIDTH = 1800
+CANVAS_HEIGHT = 1200
 NODE_WIDTH = 100
 NODE_HEIGHT = 55
-X_GAP = 150
-Y_GAP = 110
+X_GAP = 140
+Y_GAP = 100
 
 MONK_TALENT_DATA = [
     # --- Row 1 ---
@@ -85,49 +85,19 @@ MONK_TALENT_DATA = [
     {"id": "10-7", "label": "Path of\nJade", "row": 9, "col": 7, "max_rank": 1, "req": ["9-8"],
      "is_choice": True, "choices": ["Path of\nJade", "Singularly\nFocused"]},
 
-    # --- Hero Talents ---
-    # Row 12: Headers
-    {"id": "hero-sp-base", "label": "SHADO-PAN", "row": 11, "col": 2, "max_rank": 1, "req": []},
-    {"id": "hero-cotc-base", "label": "CONDUIT OF\nCELESTIALS", "row": 11, "col": 5, "max_rank": 1, "req": []},
+    # --- Simplified Hero Talents (Right Side) ---
 
-    # Row 13 - Shado-Pan
-    {"id": "hero-sp-1", "label": "Pride of\nPandaria", "row": 12, "col": 1, "max_rank": 1, "req": ["hero-sp-base"]},
-    {"id": "hero-sp-2", "label": "High\nImpact", "row": 12, "col": 2, "max_rank": 1, "req": ["hero-sp-base"]},
-    {"id": "hero-sp-3", "label": "Veteran's\nEye", "row": 12, "col": 3, "max_rank": 1, "req": ["hero-sp-base"]},
+    # Shado-Pan Tree (Column 10)
+    {"id": "hero-sp-header", "label": "Shado-Pan\nTree", "row": 0, "col": 10, "max_rank": 1, "req": []},
+    {"id": "hero-sp-choice1", "label": "Pride of\nPandaria", "row": 1, "col": 10, "max_rank": 1, "req": ["hero-sp-header"],
+     "is_choice": True, "choices": ["Pride of\nPandaria", "High\nImpact"]},
 
-    # Row 14 - Shado-Pan
-    {"id": "hero-sp-4", "label": "Martial\nPrecision", "row": 13, "col": 1, "max_rank": 1, "req": ["hero-sp-1"]},
-    {"id": "hero-sp-5", "label": "Shado Over\nBattlefield", "row": 13, "col": 2, "max_rank": 1, "req": ["hero-sp-2"]},
-    {"id": "hero-sp-6", "label": "One Vs\nMany", "row": 13, "col": 3, "max_rank": 1, "req": ["hero-sp-3"]},
-
-    # Row 15 - Shado-Pan
-    {"id": "hero-sp-7", "label": "Stand\nReady", "row": 14, "col": 1, "max_rank": 1, "req": ["hero-sp-4"]},
-    {"id": "hero-sp-8", "label": "Against All\nOdds", "row": 14, "col": 2, "max_rank": 1, "req": ["hero-sp-5"]},
-    {"id": "hero-sp-9", "label": "Efficient\nTraining", "row": 14, "col": 3, "max_rank": 1, "req": ["hero-sp-6"]},
-
-    # Row 16 - Shado-Pan
-    {"id": "hero-sp-10", "label": "Vigilant\nWatch", "row": 15, "col": 1, "max_rank": 1, "req": ["hero-sp-7"]},
-    {"id": "hero-sp-11", "label": "Weapons of\nWall", "row": 15, "col": 2, "max_rank": 1, "req": ["hero-sp-8"]},
-    {"id": "hero-sp-12", "label": "Wisdom of\nWall", "row": 15, "col": 3, "max_rank": 1, "req": ["hero-sp-9"]},
-
-    # Row 13 - COTC
-    {"id": "hero-cotc-1", "label": "Celestial\nConduit", "row": 12, "col": 5, "max_rank": 1, "req": ["hero-cotc-base"]},
-    {"id": "hero-cotc-2", "label": "Xuen's\nBond", "row": 12, "col": 6, "max_rank": 1, "req": ["hero-cotc-base"]},
-
-    # Row 14 - COTC
-    {"id": "hero-cotc-3", "label": "Heart of\nJade", "row": 13, "col": 4, "max_rank": 1, "req": ["hero-cotc-1"]},
-    {"id": "hero-cotc-4", "label": "Strength of\nOx", "row": 13, "col": 5, "max_rank": 1, "req": ["hero-cotc-1"]},
-    {"id": "hero-cotc-5", "label": "Inner\nCompass", "row": 13, "col": 6, "max_rank": 1, "req": ["hero-cotc-2"]},
-
-    # Row 15 - COTC
-    {"id": "hero-cotc-6", "label": "Courage of\nTiger", "row": 14, "col": 4, "max_rank": 1, "req": ["hero-cotc-3"]},
-    {"id": "hero-cotc-7", "label": "Xuen's\nGuidance", "row": 14, "col": 5, "max_rank": 1, "req": ["hero-cotc-4"]},
-    {"id": "hero-cotc-8", "label": "Temple\nTraining", "row": 14, "col": 6, "max_rank": 1, "req": ["hero-cotc-5"]},
-
-    # Row 16 - COTC
-    {"id": "hero-cotc-9", "label": "Restore\nBalance", "row": 15, "col": 4, "max_rank": 1, "req": ["hero-cotc-6"]},
-    {"id": "hero-cotc-10", "label": "Path of\nFalling Star", "row": 15, "col": 5, "max_rank": 1, "req": ["hero-cotc-7"]},
-    {"id": "hero-cotc-11", "label": "Unity\nWithin", "row": 15, "col": 6, "max_rank": 1, "req": ["hero-cotc-8"]},
+    # Conduit of the Celestials Tree (Column 11)
+    {"id": "hero-cotc-header", "label": "Celestial\nTree", "row": 0, "col": 11, "max_rank": 1, "req": []},
+    {"id": "hero-cotc-choice1", "label": "Xuen's\nGuidance", "row": 1, "col": 11, "max_rank": 1, "req": ["hero-cotc-header"],
+     "is_choice": True, "choices": ["Xuen's\nGuidance", "Temple\nTraining"]},
+    {"id": "hero-cotc-choice2", "label": "Restore\nBalance", "row": 2, "col": 11, "max_rank": 1, "req": ["hero-cotc-choice1"],
+     "is_choice": True, "choices": ["Restore\nBalance", "Xuen's\nBond"]},
 ]
 
 class TalentNode:
@@ -151,7 +121,7 @@ class TalentNode:
         self.avail_color = "#FF851B"
         self.border_color = "#555555"
 
-        if "hero-" in self.id and "base" in self.id:
+        if "hero-" in self.id and "header" in self.id:
             self.bg_color = "#4A235A" # Hero Header Color
 
         corner_radius = 15 if self.is_choice else 4
@@ -200,6 +170,9 @@ class TalentNode:
             if self.is_choice:
                 self.current_choice_idx = 1 - self.current_choice_idx
                 self.btn.configure(text=self._get_text())
+                # Clicking a choice node that is already active should technically just swap choices
+                # But we might need to notify parent to update selected ID list
+                self.onClick(self.id, 0) # 0 change means update/refresh
             elif self.current_rank < self.max_rank:
                 self.onClick(self.id, 1)
 
@@ -261,6 +234,7 @@ class TalentTreeWindow(ctk.CTkToplevel):
         self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
     def _build_tree(self):
+        # Draw connections first
         for data in MONK_TALENT_DATA:
             my_col = data["col"]
             my_row = data["row"]
@@ -276,9 +250,13 @@ class TalentTreeWindow(ctk.CTkToplevel):
                     p_y = 60 + p_row * Y_GAP + NODE_HEIGHT
                     self.canvas.create_line(p_x, p_y, my_x, my_y, fill="#444444", width=2, tags="conn_line")
 
+        # Draw nodes
         for data in MONK_TALENT_DATA:
             node = TalentNode(self.canvas, data, self._on_node_click)
             self.nodes[data["id"]] = node
+
+        # Labels for Hero sections
+        self.canvas.create_text(60 + 10 * X_GAP + 50, 20, text="HERO TALENTS", fill="#BDC3C7", font=("Arial", 14, "bold"))
 
     def _on_node_click(self, node_id, change):
         node = self.nodes[node_id]
@@ -286,30 +264,14 @@ class TalentTreeWindow(ctk.CTkToplevel):
             if node.current_rank < node.max_rank and self._is_node_available(node_id):
                 node.current_rank += 1
                 self.selected_talents.add(node_id)
-                # Auto-select children if Header
-                if "hero-" in node_id and "base" in node_id:
-                     self._auto_select_hero_tree(node_id)
-        else:
+        elif change < 0:
             if node.current_rank > 0 and self._can_unlearn(node_id):
                 node.current_rank -= 1
                 if node.current_rank == 0:
                     self.selected_talents.discard(node_id)
-        self._refresh_state()
 
-    def _auto_select_hero_tree(self, header_id):
-        # Find all nodes that depend on this header (directly or indirectly)
-        # Simple BFS
-        queue = [header_id]
-        while queue:
-            current = queue.pop(0)
-            for other_data in MONK_TALENT_DATA:
-                oid = other_data["id"]
-                if current in other_data.get("req", []):
-                     if oid not in self.selected_talents:
-                         node = self.nodes[oid]
-                         node.current_rank = 1
-                         self.selected_talents.add(oid)
-                         queue.append(oid)
+        # If change == 0 (toggle choice), we just refresh
+        self._refresh_state()
 
     def _is_node_available(self, node_id):
         reqs = self.nodes[node_id].reqs
@@ -321,6 +283,16 @@ class TalentTreeWindow(ctk.CTkToplevel):
         return False
 
     def _can_unlearn(self, node_id):
+        # Task 2: Relaxed unlearn check
+        # For Hero Talents, allow unlearning freely if they are leaves or if children are not taken
+        if "hero-" in node_id:
+            # Check if any active child depends on this
+            for other_id, other_node in self.nodes.items():
+                if other_node.current_rank > 0 and node_id in other_node.reqs:
+                    return False
+            return True
+
+        # Standard check for others
         for other_id, other_node in self.nodes.items():
             if other_node.current_rank > 0 and node_id in other_node.reqs:
                 active_parents = 0
@@ -334,7 +306,8 @@ class TalentTreeWindow(ctk.CTkToplevel):
     def _refresh_state(self):
         total_points = 0
         for node_id, node in self.nodes.items():
-            total_points += node.current_rank
+            if "hero-" not in node_id: # Don't count hero talents in standard points if preferred, but usually they are separate. Keeping simple sum for now.
+                total_points += node.current_rank
             is_active = node.current_rank > 0
             is_avail = self._is_node_available(node_id)
             node.update_visual(is_active, is_avail)
@@ -350,45 +323,34 @@ class TalentTreeWindow(ctk.CTkToplevel):
     def _on_save(self):
         final_list = []
 
-        # ID Mapping for Hero Talents
+        # Simplified Mapping
         hero_map = {
-            'hero-sp-base': 'ShadoPanBase',
-            'hero-sp-1': 'PrideOfPandaria',
-            'hero-sp-2': 'HighImpact',
-            'hero-sp-3': 'VeteransEye',
-            'hero-sp-4': 'MartialPrecision',
-            'hero-sp-5': 'ShadoOverTheBattlefield',
-            'hero-sp-6': 'OneVersusMany',
-            'hero-sp-7': 'StandReady',
-            'hero-sp-8': 'AgainstAllOdds',
-            'hero-sp-9': 'EfficientTraining',
-            'hero-sp-10': 'VigilantWatch',
-            'hero-sp-11': 'WeaponsOfTheWall',
-            'hero-sp-12': 'WisdomOfTheWall',
+            'hero-sp-header': 'ShadoPanBase',
+            'hero-sp-choice1': 'PrideOfPandaria', # Choice A
+            'hero-sp-choice1_b': 'HighImpact',    # Choice B
 
-            'hero-cotc-base': 'COTCBase',
-            'hero-cotc-1': 'CelestialConduit',
-            'hero-cotc-2': 'XuensBond',
-            'hero-cotc-3': 'HeartOfJadeSerpent',
-            'hero-cotc-4': 'StrengthOfBlackOx',
-            'hero-cotc-5': 'InnerCompass',
-            'hero-cotc-6': 'CourageOfWhiteTiger',
-            'hero-cotc-7': 'XuensGuidance',
-            'hero-cotc-8': 'TempleTraining',
-            'hero-cotc-9': 'RestoreBalance',
-            'hero-cotc-10': 'PathOfFallingStar',
-            'hero-cotc-11': 'UnityWithin'
+            'hero-cotc-header': 'COTCBase',
+            'hero-cotc-choice1': 'XuensGuidance', # Choice A
+            'hero-cotc-choice1_b': 'TempleTraining', # Choice B
+            'hero-cotc-choice2': 'RestoreBalance', # Choice A
+            'hero-cotc-choice2_b': 'XuensBond',   # Choice B
         }
 
         for nid in self.selected_talents:
-            # Check for mapping
-            mapped_id = hero_map.get(nid, nid)
-
             node = self.nodes[nid]
+
+            # Construct key
+            lookup_key = nid
             if node.is_choice and node.current_choice_idx == 1:
-                final_list.append(mapped_id + "_b")
-            else:
-                final_list.append(mapped_id)
+                lookup_key = nid + "_b"
+
+            mapped_id = hero_map.get(lookup_key, lookup_key)
+
+            # Legacy Choice handling for non-hero talents
+            if "hero-" not in nid and node.is_choice and node.current_choice_idx == 1:
+                mapped_id = mapped_id + "_b"
+
+            final_list.append(mapped_id)
 
         self.on_close_callback(final_list)
         self.destroy()
