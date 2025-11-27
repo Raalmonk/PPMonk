@@ -2,7 +2,7 @@ import random
 
 
 class PlayerState:
-    def __init__(self, agility=2000.0, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw', max_health=100000.0):
+    def __init__(self, agility=2000.0, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw', max_health=100000.0, target_count=1):
         self.rating_crit = rating_crit
         self.rating_haste = rating_haste
         self.rating_mastery = rating_mastery
@@ -13,16 +13,18 @@ class PlayerState:
         self.weapon_type = weapon_type  # '2h' or 'dw'
         self.attack_power = agility  # 基础 AP = 敏捷
 
-        # [新] 生命值与目标 (Task 2)
+        # [新] 生命值与目标 (Task 2 & 5)
         self.max_health = max_health
         self.target_health_pct = 1.0
+        self.target_count = max(1, target_count)
 
         self.base_mastery = 0.19
         self.base_crit = 0.10
 
-        self.max_energy = 130.0
+        # [Task 1: Base Energy Adjustment]
+        self.max_energy = 100.0
         self.energy_regen_mult = 1.0
-        self.energy = 130.0
+        self.energy = 100.0
 
         self.max_chi = 5
         self.chi = 2
@@ -60,15 +62,26 @@ class PlayerState:
         self.has_dual_threat = False
         self.has_totm = False
         self.has_glory_of_the_dawn = False
-        self.has_momentum_boost = False # Task 3
-        self.has_cyclones_drift = False # Task 4 (6-2)
-        self.has_hit_combo = False # Task 4 (5-5)
+        self.has_momentum_boost = False
+        self.has_cyclones_drift = False
+        self.has_hit_combo = False
+        self.has_jade_ignition = False # Task 2
+
+        # [Task 2/3: Row 6 & 7 Flags]
+        self.has_shadowboxing = False
+        self.has_dance_of_chiji = False
+        self.has_energy_burst = False
 
         # [新] 禅院教诲层数
         self.totm_stacks = 0
 
-        # [新] Hit Combo Stacks (Task 4)
+        # [新] Hit Combo Stacks (Task 2)
         self.hit_combo_stacks = 0
+
+        # [新] Buff Stacks (Task 2 & 3)
+        self.combo_breaker_stacks = 0
+        self.dance_of_chiji_stacks = 0
+        self.dance_of_chiji_duration = 0.0 # Track duration for DocJ
 
         # [新] 自动攻击计时器
         self.swing_timer = 0.0
@@ -92,16 +105,6 @@ class PlayerState:
         # [新] Cyclone's Drift (Task 4)
         raw_haste = (self.rating_haste / 4400.0)
         if self.has_cyclones_drift:
-            self.haste = raw_haste * 1.10 # Multiplicative? Standard WoW logic usually (1+rating)*(1+pct)-1 but prompt says "haste = raw_haste * 1.10"
-            # Prompt text: "haste = raw_haste * 1.10". Wait, raw_haste is a percentage (e.g. 0.20).
-            # If I have 20% haste, 10% more is usually 22% (1.2 * 1.1 = 1.32 -> 32%) or additive 30%.
-            # Prompt says: "Multiplicative... realization: haste = raw_haste * 1.10".
-            # If raw_haste is 0.1, result 0.11. This implies it scales the RATING conversion.
-            # Usually Haste = Rating% * Buffs.
-            # Let's interpret strictly as prompt: "haste = raw_haste * 1.10"
-            # Actually, standard formula is (1 + RatingPct) * (1 + BuffPct) - 1.
-            # But the prompt explicitly wrote: `haste = raw_haste * 1.10`.
-            # I will follow the prompt's code implementation instruction.
             self.haste = raw_haste * 1.10
         else:
             self.haste = raw_haste
@@ -146,6 +149,13 @@ class PlayerState:
                 self.momentum_buff_duration -= step
                 if self.momentum_buff_duration <= 0:
                     self.momentum_buff_active = False
+
+            # [新] Dance of Chi-Ji Tracking
+            if self.dance_of_chiji_stacks > 0:
+                self.dance_of_chiji_duration -= step
+                if self.dance_of_chiji_duration <= 0:
+                    self.dance_of_chiji_stacks = 0
+                    self.dance_of_chiji_duration = 0.0
 
             self.swing_timer -= step
             if self.swing_timer <= 0:
@@ -204,6 +214,20 @@ class PlayerState:
                     if self.channel_ticks_remaining > 0:
                         spell = self.current_channel_spell
                         tick_idx = spell.total_ticks - self.channel_ticks_remaining
+                        # [Modified for Task 6 AOE]
+                        # Spell.calculate_tick_damage returns single target damage
+                        # We need to handle AOE here if it's an active tick
+                        # However, Spell.cast handles initial burst, but ticks are here.
+                        # Wait, Spell.calculate_tick_damage is used here.
+                        # If the spell is AOE (FOF, SCK), we need to multiply by targets (with soft cap).
+                        # I should modify calculate_tick_damage to handle AOE OR handle it here.
+                        # I'll let Spell.calculate_tick_damage handle it if I pass 'player' which has target_count,
+                        # BUT calculate_tick_damage is usually "per target".
+                        # Let's see what I implemented in SpellBook.
+                        # I will modify SpellBook to handle AOE inside calculate_tick_damage or return a breakdown that indicates it.
+                        # For now, I assume calculate_tick_damage returns TOTAL damage across all targets if I implement it that way.
+                        # See SpellBook plan.
+
                         tick_dmg, breakdown = spell.calculate_tick_damage(self, tick_idx=tick_idx)
                         total_damage += tick_dmg
                         if damage_meter is not None and spell:

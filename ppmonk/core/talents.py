@@ -6,6 +6,11 @@ class Talent:
     def apply(self, player, spell_book):
         pass
 
+class PlaceholderTalent(Talent):
+    """占位天赋"""
+    def apply(self, player, spell_book):
+        pass
+
 class UnlockSpellTalent(Talent):
     def __init__(self, name, spell_abbr):
         super().__init__(name)
@@ -55,7 +60,7 @@ class SpellModTalent(Talent):
 
 class MomentumBoostTalent(Talent):
     def apply(self, player, spell_book):
-        player.has_momentum_boost = True # Task 3 Update
+        player.has_momentum_boost = True
         if 'FOF' in spell_book.spells:
             fof = spell_book.spells['FOF']
             fof.haste_dmg_scaling = True
@@ -95,7 +100,6 @@ class AscensionTalent(Talent):
         player.max_energy += 20.0
         player.max_chi += 1
         player.energy_regen_mult *= 1.10
-        # Task 1: Fix initial energy
         player.energy = player.max_energy
 
 class TouchOfTheTigerTalent(Talent):
@@ -103,7 +107,7 @@ class TouchOfTheTigerTalent(Talent):
         if 'TP' in spell_book.spells:
             spell_book.spells['TP'].damage_multiplier *= 1.15
 
-# --- Row 4 (新实装天赋) ---
+# --- Row 4 ---
 
 class DualThreatTalent(Talent):
     """4-1: Dual Threat (自动攻击强化)"""
@@ -120,13 +124,12 @@ class GloryOfTheDawnTalent(Talent):
     def apply(self, player, spell_book):
         player.has_glory_of_the_dawn = True
 
-# --- Row 5 (Task 4) ---
+# --- Row 5 ---
 
 class CraneVortexTalent(Talent):
     """5-1: Crane Vortex (SCK +15%)"""
     def apply(self, player, spell_book):
         if 'SCK' in spell_book.spells:
-            # Base * 1.15
             spell_book.spells['SCK'].ap_coeff *= 1.15
             spell_book.spells['SCK'].update_tick_coeff()
 
@@ -135,7 +138,7 @@ class MeridianStrikesTalent(Talent):
     def apply(self, player, spell_book):
         if 'ToD' in spell_book.spells:
             tod = spell_book.spells['ToD']
-            tod.base_cd = 45.0 # 90 -> 45
+            tod.base_cd = 45.0
             tod.damage_multiplier *= 1.15
 
 class RisingStarTalent(Talent):
@@ -159,12 +162,11 @@ class BrawlerIntensityTalent(Talent):
         if 'BOK' in spell_book.spells:
             spell_book.spells['BOK'].damage_multiplier *= 1.12
 
-# --- Row 6 (Task 4) ---
+# --- Row 6 (Task 2 & 3) ---
 
 class JadeIgnitionTalent(Talent):
-    """6-1: Jade Ignition (SCK triggers explosion)"""
+    """6-1: Jade Ignition"""
     def apply(self, player, spell_book):
-        # Dynamically set flag on player
         player.has_jade_ignition = True
 
 class CyclonesDriftTalent(Talent):
@@ -174,7 +176,7 @@ class CyclonesDriftTalent(Talent):
         player.update_stats()
 
 class CrashingStrikesTalent(Talent):
-    """6-2_b: Crashing Strikes (FOF Duration 5s, 6 Ticks)"""
+    """6-2_b: Crashing Strikes (FOF 5s, 6 Ticks)"""
     def apply(self, player, spell_book):
         if 'FOF' in spell_book.spells:
             fof = spell_book.spells['FOF']
@@ -182,8 +184,55 @@ class CrashingStrikesTalent(Talent):
             fof.total_ticks = 6
             fof.update_tick_coeff()
 
-class PlaceholderTalent(Talent):
-    def apply(self, player, spell_book): pass
+class DrinkingHornCoverTalent(Talent):
+    """6-3_b: Drinking Horn Cover (Zenith Duration +5s)"""
+    def apply(self, player, spell_book):
+        player.has_drinking_horn_cover = True
+
+class SpiritualFocusTalent(Talent):
+    """6-3: Spiritual Focus (Zenith CD 90->70)"""
+    def apply(self, player, spell_book):
+        if 'Zenith' in spell_book.spells:
+            spell_book.spells['Zenith'].base_cd = 70.0
+
+class ObsidianSpiralTalent(Talent):
+    """6-4: Obsidian Spiral (BOK +1 Chi during Zenith)"""
+    def apply(self, player, spell_book):
+        player.has_obsidian_spiral = True
+
+class ComboBreakerTalent(Talent):
+    """6-5: Combo Breaker (TP proc free BOK)"""
+    def apply(self, player, spell_book):
+        player.has_combo_breaker = True
+
+# --- Row 7 (Task 3) ---
+
+class DanceOfChiJiTalent(Talent):
+    """7-1: Dance of Chi-Ji"""
+    def apply(self, player, spell_book):
+        player.has_dance_of_chiji = True
+
+class ShadowboxingTreadsTalent(Talent):
+    """7-2: Shadowboxing Treads (BOK +5% dmg, Cleave)"""
+    def apply(self, player, spell_book):
+        player.has_shadowboxing = True
+
+class EnergyBurstTalent(Talent):
+    """7-4: Energy Burst (Consume Combo Breaker -> +1 Chi)"""
+    def apply(self, player, spell_book):
+        player.has_energy_burst = True
+
+class InnerPeaceTalent(Talent):
+    """7-5: Inner Peace (Max Energy +30, TP Cost -5)"""
+    def apply(self, player, spell_book):
+        player.max_energy += 30.0
+        # Re-top energy if just initialized
+        if player.energy > player.max_energy - 35.0: # Heuristic
+             player.energy = player.max_energy
+
+        if 'TP' in spell_book.spells:
+            spell_book.spells['TP'].energy_cost = 45 # 50 -> 45
+
 
 # --- 完整数据库 ---
 TALENT_DB = {
@@ -201,12 +250,12 @@ TALENT_DB = {
     '3-3': HardenedSolesTalent('Hardened Soles', rank=2),
     '3-4': AscensionTalent('Ascension'),
 
-    # Row 4 (已实装)
+    # Row 4
     '4-1': DualThreatTalent('Dual Threat'),
     '4-2': TeachingsOfTheMonasteryTalent('Teachings of the Monastery'),
     '4-3': GloryOfTheDawnTalent('Glory of the Dawn'),
 
-    # Row 5 (实装)
+    # Row 5
     '5-1': CraneVortexTalent('Crane Vortex'),
     '5-2': MeridianStrikesTalent('Meridian Strikes'),
     '5-3': RisingStarTalent('Rising Star'),
@@ -214,18 +263,24 @@ TALENT_DB = {
     '5-5': HitComboTalent('Hit Combo'),
     '5-6': BrawlerIntensityTalent('Brawler Intensity'),
 
-    # Row 6 (实装)
+    # Row 6
     '6-1': JadeIgnitionTalent('Jade Ignition'),
     '6-2': CyclonesDriftTalent('Cyclone\'s Drift'),
-    '6-2_b': CrashingStrikesTalent('Crashing Strikes'), # Added specialized ID for Crashing Strikes
-    '6-3': PlaceholderTalent('Horn Choice'),
-    '6-4': PlaceholderTalent('Obsidian Spiral'),
-    '6-5': PlaceholderTalent('Combo Breaker'),
-    '7-1': PlaceholderTalent('Dance of Chi-Ji'),
-    '7-2': PlaceholderTalent('Shadowboxing Treads'),
+    '6-2_b': CrashingStrikesTalent('Crashing Strikes'),
+    '6-3': SpiritualFocusTalent('Spiritual Focus'),
+    '6-3_b': DrinkingHornCoverTalent('Drinking Horn Cover'),
+    '6-4': ObsidianSpiralTalent('Obsidian Spiral'),
+    '6-5': ComboBreakerTalent('Combo Breaker'),
+
+    # Row 7
+    '7-1': DanceOfChiJiTalent('Dance of Chi-Ji'),
+    '7-2': ShadowboxingTreadsTalent('Shadowboxing Treads'),
     '7-3': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
-    '7-4': PlaceholderTalent('Energy Burst'),
-    '7-5': PlaceholderTalent('Inner Peace'),
+    '7-3_b': UnlockSpellTalent('Strike of the Windlord', 'SOTWL'),
+    '7-4': EnergyBurstTalent('Energy Burst'),
+    '7-5': InnerPeaceTalent('Inner Peace'),
+
+    # Placeholders for future
     '8-1': PlaceholderTalent('Tiger Eye Brew'),
     '8-2': PlaceholderTalent('Sequenced Strikes'),
     '8-3': PlaceholderTalent('Sunfire Spiral'),
@@ -249,7 +304,7 @@ TALENT_DB = {
     '10-6': PlaceholderTalent('Airborne Rhythm'),
     '10-7': PlaceholderTalent('Path of Jade'),
 
-    # 兼容旧 ID
+    # 兼容旧 ID / Shortcuts
     'WDP': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
     'SW': UnlockSpellTalent('Slicing Winds', 'SW'),
     'SOTWL': UnlockSpellTalent('Strike of the Windlord', 'SOTWL'),

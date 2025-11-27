@@ -1,11 +1,12 @@
 import random
+import math
 from .talents import TalentManager
 
 
 class Spell:
     def __init__(self, abbr, ap_coeff, name=None, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
                  cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None,
-                 max_charges=1, category=''):
+                 max_charges=1, category='', aoe_type='single'):
         self.abbr = abbr
         self.name = name if name else abbr
         self.ap_coeff = ap_coeff
@@ -31,6 +32,7 @@ class Spell:
         self.tick_dmg_ramp = 0.0
         self.triggers_combat_wisdom = False
         self.triggers_sharp_reflexes = False
+        self.aoe_type = aoe_type # 'single', 'cleave', 'soft_cap', 'uncapped'
 
         # 伤害/暴击修正
         self.damage_multiplier = 1.0
@@ -55,20 +57,73 @@ class Spell:
     def is_usable(self, player, other_spells=None):
         if not self.is_known: return False
         if self.charges < 1: return False
-        if player.energy < self.energy_cost: return False
+
+        # [Task 3: Inner Peace TP cost reduction]
+        # Applied in Talent logic, but checking just in case
+        e_cost = self.energy_cost
+
+        if player.energy < e_cost: return False
+
         cost = self.chi_cost
+
+        # [Task 2: Combo Breaker BOK free]
+        if self.abbr == 'BOK' and player.combo_breaker_stacks > 0:
+            cost = 0
+
+        # [Task 3: Dance of Chi-Ji SCK free]
+        if self.abbr == 'SCK' and player.dance_of_chiji_stacks > 0:
+            cost = 0
+
         if player.zenith_active and self.chi_cost > 0:
-            cost = max(0, self.chi_cost - 1)
+            cost = max(0, cost - 1) # Reduce AFTER free checks? Or does Zenith not stack with free?
+            # Usually Free > Reduction. If Free (0), Zenith does nothing.
+            pass
+
         if player.chi < cost: return False
         return True
 
     def cast(self, player, other_spells=None, damage_meter=None, force_proc_glory=False, force_proc_reset=False):
         player.energy -= self.energy_cost
+
         actual_chi_cost = self.chi_cost
-        if player.zenith_active and self.chi_cost > 0:
-            actual_chi_cost = max(0, self.chi_cost - 1)
+
+        # [Task 2: Combo Breaker Consumption]
+        is_combo_breaker = False
+        if self.abbr == 'BOK' and player.combo_breaker_stacks > 0:
+            actual_chi_cost = 0
+            player.combo_breaker_stacks -= 1
+            is_combo_breaker = True
+
+            # [Task 3: Energy Burst]
+            if player.has_energy_burst:
+                player.chi = min(player.max_chi, player.chi + 1)
+
+        # [Task 3: Dance of Chi-Ji Consumption]
+        is_dance_of_chiji = False
+        if self.abbr == 'SCK' and player.dance_of_chiji_stacks > 0:
+            actual_chi_cost = 0
+            player.dance_of_chiji_stacks -= 1
+            is_dance_of_chiji = True
+
+        if not is_combo_breaker and not is_dance_of_chiji:
+             if player.zenith_active and self.chi_cost > 0:
+                actual_chi_cost = max(0, self.chi_cost - 1)
+
+        # [Task 2: Obsidian Spiral (BOK generates 1 Chi during Zenith)]
+        # Does BOK normally cost 1 Chi? Yes.
+        # If Zenith is active, cost becomes 0.
+        # Obsidian Spiral: "BOK generates 1 Chi when Zenith active".
+        # So instead of costing 0, it costs 0 AND gains 1? Or just gains 1?
+        # Usually standard behavior: Cost reduced to 0, and Effect adds "Generate 1 Chi".
+        # If Zenith reduces cost to 0, then we don't spend.
+        # Then if Obsidian Spiral, we add 1.
+        obsidian_bonus = 0
+        if self.abbr == 'BOK' and player.zenith_active and getattr(player, 'has_obsidian_spiral', False):
+             obsidian_bonus = 1
+
         player.chi = max(0, player.chi - actual_chi_cost)
-        player.chi = min(player.max_chi, player.chi + self.chi_gen)
+        player.chi = min(player.max_chi, player.chi + self.chi_gen + obsidian_bonus)
+
         if self.charges == self.max_charges:
             self.current_cd = self.get_effective_cd(player)
         self.charges -= 1
@@ -78,11 +133,9 @@ class Spell:
             player.gcd_remaining = 1.0
 
         # [Mastery Check for Hit Combo]
-        # Treat first spell (when last_spell_name is None) as a new distinct spell, triggering mastery.
         triggers_mastery = self.is_combo_strike and (
                     player.last_spell_name is None or player.last_spell_name != self.abbr)
 
-        # [Task 4: Hit Combo Stacking]
         if triggers_mastery and getattr(player, 'has_hit_combo', False):
             player.hit_combo_stacks = min(5, player.hit_combo_stacks + 1)
 
@@ -91,6 +144,20 @@ class Spell:
                  player.hit_combo_stacks = 0
 
         player.last_spell_name = self.abbr
+
+        # [Task 2: Combo Breaker Proc on TP]
+        if self.abbr == 'TP' and getattr(player, 'has_combo_breaker', False):
+            # 8% Chance
+            if random.random() < 0.08:
+                player.combo_breaker_stacks = min(2, player.combo_breaker_stacks + 1)
+
+        # [Task 3: Dance of Chi-Ji Proc on Spenders]
+        if self.chi_cost > 0 and getattr(player, 'has_dance_of_chiji', False):
+            # Chance = 1.5% * Chi Cost (Simple approximation from user prompt)
+            chance = 0.015 * self.chi_cost
+            if random.random() < chance:
+                player.dance_of_chiji_stacks = min(2, player.dance_of_chiji_stacks + 1)
+                player.dance_of_chiji_duration = 15.0
 
         # 1. Sharp Reflexes
         if self.triggers_sharp_reflexes and other_spells:
@@ -106,28 +173,26 @@ class Spell:
         if self.abbr == 'TP' and player.has_totm:
             player.totm_stacks = min(4, player.totm_stacks + 1)
 
-        # [Task 4: Brawler's Intensity] - Implemented in Talents by modifying RSK CD / BOK Dmg
-
         extra_damage = 0.0
         extra_damage_details = []
 
         # [Task 4: Jade Ignition]
         if self.abbr == 'SCK' and getattr(player, 'has_jade_ignition', False):
             ji_dmg = 1.80 * player.attack_power
-            # Apply mods? "180% AP". Usually affected by Vers/Crit/HitCombo.
-            # I will treat it as a sub-event that inherits global modifiers.
-
             # Hit Combo Mod
             hit_combo_mod = 1.0
             if getattr(player, 'has_hit_combo', False):
                 hit_combo_mod = 1.0 + (player.hit_combo_stacks * 0.01)
 
-            ji_final = ji_dmg * (1.0 + player.versatility) * hit_combo_mod
+            ji_base = ji_dmg * (1.0 + player.versatility) * hit_combo_mod
 
             # Crit
             is_crit_ji = random.random() < player.crit
             if is_crit_ji:
-                ji_final *= 2.0
+                ji_base *= 2.0
+
+            # [Task 8: Jade Ignition Soft Cap]
+            ji_final = self._apply_aoe_scaling(ji_base, player, 'soft_cap')
 
             extra_damage += ji_final
             if damage_meter is not None:
@@ -144,13 +209,16 @@ class Spell:
                 extra_hits = player.totm_stacks
                 dmg_per_hit = 0.847 * player.attack_power
 
-                # Hit Combo Mod apply to TotM? Yes.
+                # Hit Combo Mod
                 hc_mod = 1.0
                 if getattr(player, 'has_hit_combo', False):
                     hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
 
                 is_crit = random.random() < (player.crit + self.bonus_crit_chance)
                 crit_m = (2.0 + self.crit_damage_bonus) if is_crit else 1.0
+
+                # TotM hits are single target usually?
+                # Prompt doesn't specify TotM AOE. Assuming Single Target to main target.
                 total_extra = extra_hits * dmg_per_hit * (1 + player.versatility) * crit_m * hc_mod
                 extra_damage += total_extra
 
@@ -207,10 +275,38 @@ class Spell:
 
         if self.abbr == 'Zenith':
             player.zenith_active = True
-            player.zenith_duration = 15.0
+            # [Task 2: Drinking Horn Cover] 15s -> 20s if talented
+            dur = 15.0
+            if getattr(player, 'has_drinking_horn_cover', False):
+                dur = 20.0
+            player.zenith_duration = dur
+
             if other_spells and 'RSK' in other_spells:
                 other_spells['RSK'].current_cd = 0
             player.chi = min(player.max_chi, player.chi + 2)
+
+            # Zenith Explosion (Not explicitly detailed in prompt but usually it deals damage when cast or ending?)
+            # Task 8 mentions "Zenith: ... apply Soft Cap rules".
+            # Assuming Zenith has an immediate damage component (Spirits of Xuen?).
+            # Prompt: "Zenith: 之前实装的 "1000% AP" 爆炸".
+            # I will add this damage here.
+            zenith_burst = 10.0 * player.attack_power
+            hc_mod = 1.0
+            if getattr(player, 'has_hit_combo', False):
+                 hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
+
+            zenith_burst = zenith_burst * (1.0 + player.versatility) * hc_mod
+            # Soft Cap
+            zenith_final = self._apply_aoe_scaling(zenith_burst, player, 'soft_cap')
+            extra_damage += zenith_final
+
+            extra_damage_details.append({
+                'name': 'Zenith Blast',
+                'damage': zenith_final,
+                'crit': False # Can it crit? Assuming no for now or already averaged
+            })
+
+
         # 4. Xuen
         if self.abbr == 'Xuen':
             player.xuen_active = True
@@ -221,7 +317,6 @@ class Spell:
             player.combat_wisdom_ready = False
             player.combat_wisdom_timer = 15.0
             eh_base = 1.2 * player.attack_power
-            # [实装] Strength of Spirit: EH 暴击 +15%
             eh_crit_chance = player.crit + 0.15
             is_crit_eh = random.random() < eh_crit_chance
             eh_dmg = eh_base * (1.0 + player.versatility) * (2.0 if is_crit_eh else 1.0)
@@ -242,6 +337,15 @@ class Spell:
             player.channel_tick_interval = self.get_tick_interval(player)
             player.time_until_next_tick = player.channel_tick_interval
             player.channel_mastery_snapshot = triggers_mastery
+
+            # [Task 3: Dance of Chi-Ji Bonus Dmg?]
+            # If SCK consumed DoCJ, should ticks deal more damage?
+            # I'll handle this in calculate_tick_damage by checking a flag on the spell instance if needed,
+            # or player state. Player state 'dance_of_chiji_stacks' is consumed.
+            # I need to snapshot this buff for the channel duration.
+            # I'll add a temporary attribute to the spell instance or player channel state.
+            player.channel_docj_snapshot = is_dance_of_chiji
+
             # Structured breakdown for channeling start
             breakdown = {
                 'base': 0,
@@ -252,9 +356,9 @@ class Spell:
             return 0.0, breakdown
         else:
             base_dmg, breakdown = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
+            # base_dmg from calculate_tick_damage is now TOTAL AOE damage (see below)
             total_damage = base_dmg + extra_damage
 
-            # If extra damage happened, append to breakdown
             if extra_damage_details:
                 breakdown['extra_events'] = extra_damage_details
                 breakdown['extra_damage_total'] = extra_damage
@@ -262,7 +366,10 @@ class Spell:
             return total_damage, breakdown
 
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
-        base_dmg = self.tick_coeff * player.attack_power
+        # This calculates damage for ONE TICK (for channeled) or ONE CAST (instant)
+        # It needs to return TOTAL damage across all targets.
+
+        base_dmg_per_target = self.tick_coeff * player.attack_power
 
         modifiers = {}
         flags = []
@@ -270,27 +377,21 @@ class Spell:
         dmg_mod = 1.0
 
         # Spell Specific Mods
-        spell_mod = self.damage_multiplier # Modified by talents
+        spell_mod = self.damage_multiplier
         if spell_mod != 1.0:
              modifiers['Talent/Spell'] = spell_mod
         dmg_mod *= spell_mod
 
-        if self.abbr == 'RSK':
-            # Base RSK mod moved to ap_coeff or damage_multiplier via Talent or Init?
-            # Original code: "spell_mod *= 1.70". This seems to be a hardcoded boost for RSK separate from ap_coeff.
-            # I will keep it for now unless I changed ap_coeff in SpellBook.
-            # RSK AP is 4.228.
-            pass # No additional hardcoded mod needed if AP is correct, but let's keep original logic if it wasn't broken,
-                 # BUT I should check if the original code had it.
-                 # Original code:
-                 # if self.abbr == 'RSK': spell_mod *= 1.70
-                 # if self.abbr == 'SCK': spell_mod *= 1.10
-                 # Wait, these look like hidden aura buffs.
-            pass
-
-        # Re-apply Hardcoded Aura Mods from original file (preserved)
-        # Note: damage_multiplier in my new class handles Talent boosts.
-        # I need to be careful not to double dip or lose the 1.7x
+        # [Task 3: Dance of Chi-Ji Bonus Damage for SCK]
+        # Check snapshot if channeling, or player state if instant (SCK is channeled).
+        # SCK is channeled, so this function is called per tick.
+        # We need to know if DoCJ was active.
+        if self.abbr == 'SCK':
+             is_docj = getattr(player, 'channel_docj_snapshot', False)
+             if is_docj:
+                 # "Damage increased" - user said optional, I chose 200%
+                 dmg_mod *= 2.0
+                 modifiers['DanceOfChiJi'] = 2.0
 
         hidden_mod = 1.0
         if self.abbr == 'RSK': hidden_mod *= 1.70
@@ -306,6 +407,11 @@ class Spell:
         if aura_mod != 1.0:
             modifiers['Aura'] = aura_mod
         dmg_mod *= aura_mod
+
+        # [Task 3: Shadowboxing Treads - BOK +5%]
+        if self.abbr == 'BOK' and getattr(player, 'has_shadowboxing', False):
+            dmg_mod *= 1.05
+            modifiers['Shadowboxing'] = 1.05
 
         # [Task 4: Hit Combo]
         if getattr(player, 'has_hit_combo', False) and player.hit_combo_stacks > 0:
@@ -337,18 +443,63 @@ class Spell:
 
         crit_chance = min(1.0, player.crit + self.bonus_crit_chance)
         crit_mult = 2.0 + self.crit_damage_bonus
-        expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
+
+        # Expected value per target
+        expected_dmg_single = (base_dmg_per_target * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
+
+        # [Task 6: AOE Scaling Calculation]
+        # Now we apply target counting logic
+
+        total_expected_dmg = 0.0
+
+        # Determine AOE Type
+        # BOK becomes 'cleave' if Shadowboxing Treads is active
+        current_aoe_type = self.aoe_type
+        if self.abbr == 'BOK' and getattr(player, 'has_shadowboxing', False):
+            current_aoe_type = 'cleave'
+
+        total_expected_dmg = self._apply_aoe_scaling(expected_dmg_single, player, current_aoe_type)
 
         breakdown = {
-            'base': int(base_dmg),
+            'base': int(base_dmg_per_target),
             'modifiers': modifiers,
             'flags': flags,
             'crit_chance': crit_chance,
             'crit_mult': crit_mult,
-            'final_mod': dmg_mod
+            'final_mod': dmg_mod,
+            'aoe_type': current_aoe_type,
+            'targets': player.target_count,
+            'total_dmg_after_aoe': total_expected_dmg
         }
 
-        return expected_dmg, breakdown
+        return total_expected_dmg, breakdown
+
+    def _apply_aoe_scaling(self, damage_per_target, player, aoe_type):
+        target_count = player.target_count
+        if aoe_type == 'single':
+            return damage_per_target
+
+        elif aoe_type == 'cleave':
+            # Main target full damage
+            total = damage_per_target
+            # Secondary targets (max 2) at 80%
+            if target_count > 1:
+                secondary_targets = min(target_count - 1, 2) # "Cleave 2 additional" -> Total 3 max
+                total += damage_per_target * 0.80 * secondary_targets
+            return total
+
+        elif aoe_type == 'soft_cap':
+            if target_count <= 5:
+                return damage_per_target * target_count
+            else:
+                # > 5 targets: dmg = base * sqrt(5 / count)
+                reduced_dmg = damage_per_target * math.sqrt(5.0 / target_count)
+                return reduced_dmg * target_count
+
+        elif aoe_type == 'uncapped':
+             return damage_per_target * target_count
+
+        return damage_per_target
 
     def tick_cd(self, dt):
         if self.charges < self.max_charges:
@@ -362,28 +513,11 @@ class Spell:
 class TouchOfDeath(Spell):
     def is_usable(self, player, other_spells):
         if not super().is_usable(player): return False
-        # Condition: target_health_pct < 0.15
         if player.target_health_pct >= 0.15: return False
         return True
 
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
-        # 35% of Max Health
         base_dmg = player.max_health * 0.35
-
-        # True Damage logic: Unaffected by Armor/Dr/Versatility?
-        # Prompt: "Physical damage (unaffected by armor mitigation)".
-        # In this sim, we usually apply Versatility to everything unless specified.
-        # But "True Damage" usually implies fixed value.
-        # However, the prompt says "Touch of Death (ToD)... 35% of Max HP... Physical (unaffected by armor)".
-        # Since we don't simulate armor reduction here (all phys is just AP * coeff),
-        # we can treat it as a flat damage value.
-        # DOES IT CRIT? ToD usually doesn't crit.
-        # DOES IT SCALE WITH HIT COMBO? "Damage increased by 15% (Meridian Strikes)".
-        # Hit Combo is global dmg increase.
-        # I will apply Talent Multipliers and Global Modifiers (like Hit Combo), but maybe not Crit/Vers if it's "True".
-        # But usually in WoW ToD is specific.
-        # Let's assume it scales with: Talent Modifiers (Meridian) and Hit Combo.
-        # I will include Versatility too as it's a global outgoing dmg mod.
 
         modifiers = {}
         dmg_mod = 1.0
@@ -398,6 +532,11 @@ class TouchOfDeath(Spell):
             dmg_mod *= hc_mod
 
         final_dmg = base_dmg * dmg_mod
+
+        # AOE: ToD is Single Target ('single') usually.
+        # But if Meridian Strikes or something makes it AOE? No.
+        # Fatal Flying Guillotine? (Not in this prompt).
+        # Assuming Single Target.
 
         breakdown = {
             'base': int(base_dmg),
@@ -425,21 +564,21 @@ class SpellBook:
         elif active_talents is None and talents is not None:
             active_talents = talents
 
-        # 基础伤害系数需按实际修改，此处简化
+        # [Task 1 & 6: Config AOE Types]
         fof_max_ticks = 5
         self.spells = {
-            'TP': Spell('TP', 0.88, name="Tiger Palm", energy=50, chi_gen=2, category='Minor Filler'),
-            'BOK': Spell('BOK', 3.56, name="Blackout Kick", chi_cost=1, category='Minor Filler'),
-            'RSK': Spell('RSK', 4.228, name="Rising Sun Kick", chi_cost=2, cd=10.0, cd_haste=True, category='Major Filler'),
-            'SCK': Spell('SCK', 3.52, name="Spinning Crane Kick", chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True, category='Minor Filler'),
+            'TP': Spell('TP', 0.88, name="Tiger Palm", energy=50, chi_gen=2, category='Minor Filler', aoe_type='single'),
+            'BOK': Spell('BOK', 3.56, name="Blackout Kick", chi_cost=1, category='Minor Filler', aoe_type='single'), # Becomes cleave via talent
+            'RSK': Spell('RSK', 4.228, name="Rising Sun Kick", chi_cost=2, cd=10.0, cd_haste=True, category='Major Filler', aoe_type='single'),
+            'SCK': Spell('SCK', 3.52, name="Spinning Crane Kick", chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True, category='Minor Filler', aoe_type='soft_cap'),
             'FOF': Spell('FOF', 2.07 * fof_max_ticks, name="Fists of Fury", chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True,
-                         ticks=fof_max_ticks, cast_time=4.0, cast_haste=True, req_talent=True, category='Major Filler'),
-            'WDP': SpellWDP('WDP', 5.40, name="Whirling Dragon Punch", cd=30.0, req_talent=True, category='Minor Cooldown'),
-            'SOTWL': Spell('SOTWL', 15.12, name="Strike of the Windlord", chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown'),
-            'SW': Spell('SW', 8.96, name="Slicing Winds", cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown'),
+                         ticks=fof_max_ticks, cast_time=4.0, cast_haste=True, req_talent=True, category='Major Filler', aoe_type='soft_cap'),
+            'WDP': SpellWDP('WDP', 5.40, name="Whirling Dragon Punch", cd=30.0, req_talent=True, category='Minor Cooldown', aoe_type='soft_cap'),
+            'SOTWL': Spell('SOTWL', 15.12, name="Strike of the Windlord", chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown', aoe_type='soft_cap'),
+            'SW': Spell('SW', 8.96, name="Slicing Winds", cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown', aoe_type='single'), # Usually single? Or Cleave? Assuming Single.
             'Xuen': Spell('Xuen', 0.0, name="Invoke Xuen", cd=120.0, req_talent=True, gcd_override=0.0, category='Major Cooldown'),
-            'Zenith': Spell('Zenith', 0.0, name="Zenith", cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown'),
-            'ToD': TouchOfDeath('ToD', 0.0, name="Touch of Death", cd=90.0, energy=0, chi_gen=3, req_talent=False, category='Major Cooldown') # [Task 2]
+            'Zenith': Spell('Zenith', 0.0, name="Zenith", cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown', aoe_type='soft_cap'),
+            'ToD': TouchOfDeath('ToD', 0.0, name="Touch of Death", cd=90.0, energy=0, chi_gen=3, req_talent=False, category='Major Cooldown', aoe_type='single')
         }
         self.spells['TP'].triggers_combat_wisdom = True
         self.spells['BOK'].triggers_sharp_reflexes = True

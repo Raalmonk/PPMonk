@@ -1,6 +1,5 @@
 import queue
 import threading
-
 import customtkinter as ctk
 
 from main import SCENARIO_MAP, run_simulation
@@ -8,23 +7,18 @@ from ppmonk.ui.timeline_view import NativeTimelineWindow
 from ppmonk.ui.talent_ui import TalentTreeWindow
 from ppmonk.ui.sandbox_ui import SandboxWindow
 
-
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("dark-blue")
-
 
 def _crit_percent_to_rating(percent):
     base = 0.10
     return max(0, (percent / 100 - base) * 4600)
 
-
 def _haste_percent_to_rating(percent):
     return max(0, (percent / 100) * 4400)
 
-
 def _vers_percent_to_rating(percent):
     return max(0, (percent / 100) * 5400)
-
 
 def _mastery_percent_to_rating(percent):
     base = 0.19
@@ -51,6 +45,7 @@ class PPMonkApp(ctk.CTk):
         self.status_var = ctk.StringVar(value="Ready")
         self.total_ap_var = ctk.StringVar(value="--")
         self.scenario_var = ctk.StringVar(value="Patchwerk")
+        self.target_count_var = ctk.IntVar(value=1) # [Task 7: Target Count]
         self.last_timeline_data = None
 
         self._build_layout()
@@ -125,7 +120,6 @@ class PPMonkApp(ctk.CTk):
         self.talent_summary_label = ctk.CTkLabel(sidebar, text="Selected: Default")
         self.talent_summary_label.grid(row=7, column=0, padx=20, pady=0)
 
-        # Default talents must unlock Fists of Fury and its supporting procs
         self.active_talents_list = ["1-1", "2-1", "2-2", "WDP", "SW", "Ascension"]
         self.talent_summary_label.configure(text=f"Selected: {len(self.active_talents_list)} nodes")
 
@@ -139,6 +133,25 @@ class PPMonkApp(ctk.CTk):
         )
         scenario_menu.grid(row=10, column=0, padx=20, pady=6, sticky="ew")
 
+        # [Task 7: Target Count UI]
+        target_label = ctk.CTkLabel(sidebar, text="Target Count", font=ctk.CTkFont(weight="bold"))
+        target_label.grid(row=11, column=0, padx=20, pady=(10, 4), sticky="w")
+
+        target_frame = ctk.CTkFrame(sidebar)
+        target_frame.grid(row=12, column=0, padx=20, pady=6, sticky="ew")
+        target_frame.grid_columnconfigure(1, weight=1)
+
+        self.target_label_val = ctk.CTkLabel(target_frame, textvariable=self.target_count_var)
+        self.target_label_val.grid(row=0, column=2, padx=5)
+
+        target_slider = ctk.CTkSlider(
+            target_frame,
+            from_=1, to=20, number_of_steps=19,
+            variable=self.target_count_var
+        )
+        target_slider.grid(row=0, column=1, padx=5, sticky="ew")
+
+
         start_btn = ctk.CTkButton(
             sidebar,
             text="Start Simulation",
@@ -146,7 +159,7 @@ class PPMonkApp(ctk.CTk):
             hover_color="#146645",
             command=self._start_simulation,
         )
-        start_btn.grid(row=11, column=0, padx=20, pady=20, sticky="ew")
+        start_btn.grid(row=13, column=0, padx=20, pady=20, sticky="ew")
         self.start_btn = start_btn
 
         self.stop_btn = ctk.CTkButton(
@@ -157,7 +170,7 @@ class PPMonkApp(ctk.CTk):
             state="disabled",
             command=self._stop_simulation,
         )
-        self.stop_btn.grid(row=12, column=0, padx=20, pady=(0, 20), sticky="ew")
+        self.stop_btn.grid(row=14, column=0, padx=20, pady=(0, 20), sticky="ew")
 
         self.timeline_btn = ctk.CTkButton(
             sidebar,
@@ -165,7 +178,7 @@ class PPMonkApp(ctk.CTk):
             state="disabled",
             command=self._open_timeline,
         )
-        self.timeline_btn.grid(row=13, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.timeline_btn.grid(row=15, column=0, padx=20, pady=(0, 10), sticky="ew")
 
         self.sandbox_btn = ctk.CTkButton(
             sidebar,
@@ -174,7 +187,7 @@ class PPMonkApp(ctk.CTk):
             hover_color="#A04000",
             command=self._open_sandbox,
         )
-        self.sandbox_btn.grid(row=14, column=0, padx=20, pady=(0, 20), sticky="ew")
+        self.sandbox_btn.grid(row=16, column=0, padx=20, pady=(0, 20), sticky="ew")
 
         main = ctk.CTkFrame(self)
         main.grid(row=0, column=1, sticky="nsew")
@@ -221,7 +234,12 @@ class PPMonkApp(ctk.CTk):
             timeline_window.focus()
 
     def _open_sandbox(self):
-        sandbox = SandboxWindow(self)
+        # [Task 1 & 7] Pass active talents
+        sandbox = SandboxWindow(self, active_talents=self.active_talents_list)
+        # Maybe pass current target count default too? Sandbox has its own control.
+        # But setting initial value would be nice.
+        sandbox.target_count.set(self.target_count_var.get())
+        sandbox._reset_sandbox() # Force reset with new values if needed
         sandbox.focus()
 
     def _on_talents_updated(self, talent_list):
@@ -280,12 +298,14 @@ class PPMonkApp(ctk.CTk):
         stats = {name: var.get() for name, var in self.stat_vars.items()}
         talents = self.active_talents_list
         scenario = self.scenario_var.get()
+        target_count = self.target_count_var.get()
 
         ratings = {
             "haste_rating": _haste_percent_to_rating(stats["Haste"]),
             "crit_rating": _crit_percent_to_rating(stats["Crit"]),
             "mastery_rating": _mastery_percent_to_rating(stats["Mastery"]),
             "vers_rating": _vers_percent_to_rating(stats["Versatility"]),
+            "target_count": target_count # [Task 7]
         }
 
         thread = threading.Thread(
@@ -358,5 +378,3 @@ if __name__ == "__main__":
 
     multiprocessing.freeze_support()
     main()
-
-
