@@ -143,6 +143,12 @@ class Spell:
                 if damage_meter is not None:
                     damage_meter['Glory of Dawn'] = damage_meter.get('Glory of Dawn', 0) + final_glory
 
+                extra_damage_details.append({
+                    'name': 'Glory of the Dawn',
+                    'damage': final_glory,
+                    'crit': is_crit
+                })
+
         if self.abbr == 'Zenith':
             player.zenith_active = True
             player.zenith_duration = 15.0
@@ -184,15 +190,22 @@ class Spell:
             player.channel_tick_interval = self.get_tick_interval(player)
             player.time_until_next_tick = player.channel_tick_interval
             player.channel_mastery_snapshot = triggers_mastery
-            # Return empty string or "Channeling..." for breakdown
-            return 0.0, "(Channeling)"
+            # Structured breakdown for channeling start
+            breakdown = {
+                'base': 0,
+                'modifiers': {},
+                'flags': ['Channeling'],
+                'extra_events': extra_damage_details
+            }
+            return 0.0, breakdown
         else:
             base_dmg, breakdown = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
             total_damage = base_dmg + extra_damage
 
             # If extra damage happened, append to breakdown
-            if extra_damage > 0:
-                breakdown += f" + Extra: {int(extra_damage)}"
+            if extra_damage_details:
+                breakdown['extra_events'] = extra_damage_details
+                breakdown['extra_damage_total'] = extra_damage
 
             return total_damage, breakdown
 
@@ -235,16 +248,34 @@ class Spell:
         apply_mastery = mastery_override if mastery_override is not None else (
             self.is_channeled and player.channel_mastery_snapshot)
         if apply_mastery:
-            dmg_mod *= (1.0 + player.mastery)
-        dmg_mod *= (1.0 + player.versatility)
+            m_mod = (1.0 + player.mastery)
+            modifiers['Mastery'] = m_mod
+            dmg_mod *= m_mod
+            flags.append('Mastery')
+
+        v_mod = (1.0 + player.versatility)
+        modifiers['Versatility'] = v_mod
+        dmg_mod *= v_mod
 
         crit_chance = min(1.0, player.crit + self.bonus_crit_chance)
         crit_mult = 2.0 + self.crit_damage_bonus
         expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
 
-        breakdown_string = f"(Base: {int(base_dmg)}, Mod: {dmg_mod:.2f}, Crit: {crit_chance*100:.1f}%)"
+        # Flags for crit
+        # Note: Expected damage includes crit average.
+        # Ideally we might want to flag 'Crit' if we were simulating a single hit,
+        # but for expected damage we just show the chance.
 
-        return expected_dmg, breakdown_string
+        breakdown = {
+            'base': int(base_dmg),
+            'modifiers': modifiers,
+            'flags': flags,
+            'crit_chance': crit_chance,
+            'crit_mult': crit_mult,
+            'final_mod': dmg_mod
+        }
+
+        return expected_dmg, breakdown
 
     def tick_cd(self, dt):
         if self.charges < self.max_charges:

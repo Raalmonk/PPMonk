@@ -137,15 +137,21 @@ class PlayerState:
                 if damage_meter is not None:
                     damage_meter[key] = damage_meter.get(key, 0) + expected_dmg
 
-                breakdown = f"(Base: {int(base_dmg)}, Vers: {self.versatility*100:.1f}%, Crit: {crit_chance*100:.1f}%)"
+                breakdown = {
+                    'base': int(base_dmg),
+                    'modifiers': {'Versatility': 1.0 + self.versatility},
+                    'flags': ['Dual Threat'] if is_dual_threat else [],
+                    'crit_chance': crit_chance,
+                    'crit_mult': crit_mult,
+                    'final_mod': dmg_mod
+                }
+
                 log_entries.append({
                     "Action": key,
-                    "Base": base_dmg,
-                    "Dmg Mod": dmg_mod,
-                    "Crit%": crit_chance,
-                    "Crit Mult": crit_mult,
                     "Expected DMG": expected_dmg,
-                    "Breakdown": breakdown
+                    "Breakdown": breakdown,
+                    "source": "passive",
+                    "offset": elapsed  # Time relative to the start of this advance_time call
                 })
 
             if self.is_channeling:
@@ -166,7 +172,9 @@ class PlayerState:
                         log_entries.append({
                             "Action": f"{spell.abbr} (Tick)",
                             "Expected DMG": tick_dmg,
-                            "Breakdown": breakdown
+                            "Breakdown": breakdown,
+                            "source": "active",
+                            "offset": elapsed
                         })
 
                 if self.channel_time_remaining <= 1e-6 or self.channel_ticks_remaining <= 0:
