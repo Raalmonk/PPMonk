@@ -3,10 +3,11 @@ from .talents import TalentManager
 
 
 class Spell:
-    def __init__(self, abbr, ap_coeff, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
+    def __init__(self, abbr, ap_coeff, name=None, energy=0, chi_cost=0, chi_gen=0, cd=0, cd_haste=False,
                  cast_time=0, cast_haste=False, is_channeled=False, ticks=1, req_talent=False, gcd_override=None,
                  max_charges=1, category=''):
         self.abbr = abbr
+        self.name = name if name else abbr
         self.ap_coeff = ap_coeff
         self.energy_cost = energy
         self.category = category
@@ -91,6 +92,7 @@ class Spell:
             player.totm_stacks = min(4, player.totm_stacks + 1)
 
         extra_damage = 0.0
+        extra_damage_details = []
 
         if self.abbr == 'BOK' and player.has_totm:
             if player.totm_stacks > 0:
@@ -103,6 +105,13 @@ class Spell:
 
                 if damage_meter is not None:
                     damage_meter['TotM'] = damage_meter.get('TotM', 0) + total_extra
+
+                extra_damage_details.append({
+                    'name': 'Teachings of the Monastery',
+                    'damage': total_extra,
+                    'hits': extra_hits,
+                    'crit': is_crit
+                })
 
                 player.totm_stacks = 0
 
@@ -156,6 +165,12 @@ class Spell:
             eh_dmg = eh_base * (1.0 + player.versatility) * (2.0 if is_crit_eh else 1.0)
             extra_damage += eh_dmg
 
+            extra_damage_details.append({
+                'name': 'Expel Harm (Passive)',
+                'damage': eh_dmg,
+                'crit': is_crit_eh
+            })
+
         triggers_mastery = self.is_combo_strike and (player.last_spell_name is not None) and (
                     player.last_spell_name != self.abbr)
         player.last_spell_name = self.abbr
@@ -183,18 +198,40 @@ class Spell:
 
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
         base_dmg = self.tick_coeff * player.attack_power
+
+        modifiers = {}
+        flags = []
+
         dmg_mod = 1.0
+
+        # Spell Specific Mods
+        spell_mod = 1.0
         if self.abbr == 'RSK':
-            dmg_mod *= 1.70
+            spell_mod *= 1.70
         if self.abbr == 'SCK':
-            dmg_mod *= 1.10
-        dmg_mod *= 1.04
+            spell_mod *= 1.10
+        if spell_mod != 1.0:
+            modifiers['Spell'] = spell_mod
+        dmg_mod *= spell_mod
+
+        # Aura Mod
+        aura_mod = 1.04
         if self.abbr in ['TP', 'BOK', 'RSK', 'SCK', 'FOF', 'WDP', 'SOTWL']:
-            dmg_mod *= 1.04
+            aura_mod *= 1.04
+        if aura_mod != 1.0:
+            modifiers['Aura'] = aura_mod
+        dmg_mod *= aura_mod
+
         if self.haste_dmg_scaling:
-            dmg_mod *= (1.0 + player.haste)
+            h_mod = (1.0 + player.haste)
+            modifiers['HasteScale'] = h_mod
+            dmg_mod *= h_mod
+
         if self.tick_dmg_ramp > 0:
-            dmg_mod *= (1.0 + (tick_idx + 1) * self.tick_dmg_ramp)
+            ramp_mod = (1.0 + (tick_idx + 1) * self.tick_dmg_ramp)
+            modifiers['TickRamp'] = ramp_mod
+            dmg_mod *= ramp_mod
+
         apply_mastery = mastery_override if mastery_override is not None else (
             self.is_channeled and player.channel_mastery_snapshot)
         if apply_mastery:
@@ -235,20 +272,19 @@ class SpellBook:
             active_talents = talents
 
         # 基础伤害系数需按实际修改，此处简化
-        # 注意：Zenith 在此被定义，彻底解决 KeyError
         fof_max_ticks = 5
         self.spells = {
-            'TP': Spell('TP', 0.88, energy=50, chi_gen=2, category='Minor Filler'),
-            'BOK': Spell('BOK', 3.56, chi_cost=1, category='Minor Filler'),
-            'RSK': Spell('RSK', 4.228, chi_cost=2, cd=10.0, cd_haste=True, category='Major Filler'),
-            'SCK': Spell('SCK', 3.52, chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True, category='Minor Filler'),
-            'FOF': Spell('FOF', 2.07 * fof_max_ticks, chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True,
+            'TP': Spell('TP', 0.88, name="Tiger Palm", energy=50, chi_gen=2, category='Minor Filler'),
+            'BOK': Spell('BOK', 3.56, name="Blackout Kick", chi_cost=1, category='Minor Filler'),
+            'RSK': Spell('RSK', 4.228, name="Rising Sun Kick", chi_cost=2, cd=10.0, cd_haste=True, category='Major Filler'),
+            'SCK': Spell('SCK', 3.52, name="Spinning Crane Kick", chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True, category='Minor Filler'),
+            'FOF': Spell('FOF', 2.07 * fof_max_ticks, name="Fists of Fury", chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True,
                          ticks=fof_max_ticks, cast_time=4.0, cast_haste=True, req_talent=True, category='Major Filler'),
-            'WDP': SpellWDP('WDP', 5.40, cd=30.0, req_talent=True, category='Minor Cooldown'),
-            'SOTWL': Spell('SOTWL', 15.12, chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown'),
-            'SW': Spell('SW', 8.96, cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown'),
-            'Xuen': Spell('Xuen', 0.0, cd=120.0, req_talent=True, gcd_override=0.0, category='Major Cooldown'),
-            'Zenith': Spell('Zenith', 0.0, cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown')
+            'WDP': SpellWDP('WDP', 5.40, name="Whirling Dragon Punch", cd=30.0, req_talent=True, category='Minor Cooldown'),
+            'SOTWL': Spell('SOTWL', 15.12, name="Strike of the Windlord", chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown'),
+            'SW': Spell('SW', 8.96, name="Slicing Winds", cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown'),
+            'Xuen': Spell('Xuen', 0.0, name="Invoke Xuen", cd=120.0, req_talent=True, gcd_override=0.0, category='Major Cooldown'),
+            'Zenith': Spell('Zenith', 0.0, name="Zenith", cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown')
         }
         self.spells['TP'].triggers_combat_wisdom = True
         self.spells['BOK'].triggers_sharp_reflexes = True
