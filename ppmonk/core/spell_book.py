@@ -34,12 +34,11 @@ class Spell:
         self.aoe_type = aoe_type # 'single', 'cleave', 'soft_cap', 'uncapped'
         self.damage_type = damage_type # 'Physical' or 'Nature'
 
-        # [Task 1: Modifiers Refactor]
-        self.modifiers = [] # List[Tuple[str, float]] e.g. [("Base", 1.0)]
+        self.modifiers = [] # List[Tuple[str, float]]
         self.crit_modifiers = [] # List[Tuple[str, float]]
 
-        # Legacy attributes for compatibility with older code if any, but we should use new lists
-        self.damage_multiplier = 1.0 # Deprecated but kept to avoid instant crashes if I missed one
+        # Legacy attributes
+        self.damage_multiplier = 1.0
         self.bonus_crit_chance = 0.0
         self.crit_damage_bonus = 0.0
 
@@ -54,9 +53,12 @@ class Spell:
 
     def get_effective_cd(self, player):
         base = self.base_cd
-        # [Task 3: Communion with Wind] (CD -5s for SOTWL/WDP)
         if self.abbr in ['SOTWL', 'WDP'] and getattr(player, 'has_communion_with_wind', False):
             base -= 5.0
+        # Efficient Training (Zenith CD -10s)
+        if self.abbr == 'Zenith' and getattr(player, 'has_stand_ready', False):
+             # Handled in Talent Apply but double check if logic is here
+             pass
 
         if self.cd_haste: return base / (1.0 + player.haste)
         return max(0.0, base)
@@ -104,7 +106,6 @@ class Spell:
             if player.has_energy_burst:
                 player.chi = min(player.max_chi, player.chi + 1)
 
-            # [Task 3: RWK Trigger]
             if getattr(player, 'has_rushing_wind_kick', False):
                 if random.random() < 0.40:
                     player.rwk_ready = True
@@ -115,7 +116,6 @@ class Spell:
             player.dance_of_chiji_stacks -= 1
             is_dance_of_chiji = True
 
-            # [Task 3: Sequenced Strikes]
             if getattr(player, 'has_sequenced_strikes', False):
                 player.combo_breaker_stacks = min(2, player.combo_breaker_stacks + 1)
 
@@ -130,7 +130,6 @@ class Spell:
         player.chi = max(0, player.chi - actual_chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen + obsidian_bonus)
 
-        # [Task 3: Memory of the Monastery]
         tp_proc_chance = 0.08
         if getattr(player, 'has_memory_of_monastery', False):
             tp_proc_chance = 0.10
@@ -167,7 +166,6 @@ class Spell:
                 player.dance_of_chiji_stacks = min(2, player.dance_of_chiji_stacks + 1)
                 player.dance_of_chiji_duration = 15.0
 
-        # [Task 3: Revolving Whirl & Echo Technique]
         if self.abbr in ['SOTWL', 'WDP']:
             if getattr(player, 'has_revolving_whirl', False):
                 player.dance_of_chiji_stacks = min(2, player.dance_of_chiji_stacks + 1)
@@ -175,11 +173,9 @@ class Spell:
             if getattr(player, 'has_echo_technique', False):
                 player.combo_breaker_stacks = min(2, player.combo_breaker_stacks + 1)
 
-            # [Task 3: Knowledge of Broken Temple]
             if getattr(player, 'has_knowledge_of_broken_temple', False):
                 player.totm_stacks = min(player.max_totm_stacks, player.totm_stacks + 4)
 
-            # [Task 3: Thunderfist Stack Gen]
             if getattr(player, 'has_thunderfist', False):
                  player.thunderfist_stacks += (4 + player.target_count)
 
@@ -200,15 +196,52 @@ class Spell:
         extra_damage = 0.0
         extra_damage_details = []
 
-        # Jade Ignition (Nature)
-        if self.abbr == 'SCK' and getattr(player, 'has_jade_ignition', False):
-            # 1.80 * AP * Agility
-            ji_base = 1.80 * player.attack_power * player.agility
+        # [Shado-Pan] FOF Consumption of Flurry Charges
+        if self.abbr == 'FOF' and player.flurry_charges > 0:
+            consumed = player.flurry_charges
+            player.flurry_charges = 0
 
+            # Trigger Flurry Strikes Logic for each stack?
+            # "Consume all charges... Trigger Flurry Strikes damage per stack"
+            # We treat this as a single large event or multiple.
+            # Lets treat as 1 big event for logs.
+
+            flurry_total, sob_total, hi_total = self._calculate_flurry_strikes_damage(player, consumed, scale=1.0)
+
+            extra_damage += flurry_total + sob_total + hi_total
+
+            if damage_meter is not None:
+                if flurry_total > 0: damage_meter['Flurry Strikes'] = damage_meter.get('Flurry Strikes', 0) + flurry_total
+                if sob_total > 0: damage_meter['Shado Over Battlefield'] = damage_meter.get('Shado Over Battlefield', 0) + sob_total
+                if hi_total > 0: damage_meter['High Impact'] = damage_meter.get('High Impact', 0) + hi_total
+
+            extra_damage_details.append({
+                'name': f'Flurry Burst (FOF) x{consumed}',
+                'damage': flurry_total,
+                'sob_damage': sob_total,
+                'hi_damage': hi_total
+            })
+
+        # [Shado-Pan] Wisdom of the Wall (Zenith Active + RSK/SCK) -> Trigger 3x Flurry
+        if getattr(player, 'has_wisdom_of_the_wall', False) and player.zenith_active:
+            if self.abbr in ['RSK', 'SCK']:
+                 flurry_total, sob_total, hi_total = self._calculate_flurry_strikes_damage(player, 3, scale=1.0)
+                 extra_damage += flurry_total + sob_total + hi_total
+                 if damage_meter is not None:
+                    if flurry_total > 0: damage_meter['Flurry Strikes'] = damage_meter.get('Flurry Strikes', 0) + flurry_total
+                    if sob_total > 0: damage_meter['Shado Over Battlefield'] = damage_meter.get('Shado Over Battlefield', 0) + sob_total
+                    if hi_total > 0: damage_meter['High Impact'] = damage_meter.get('High Impact', 0) + hi_total
+                 extra_damage_details.append({
+                    'name': f'Wisdom of Wall x3',
+                    'damage': flurry_total
+                 })
+
+        # Jade Ignition
+        if self.abbr == 'SCK' and getattr(player, 'has_jade_ignition', False):
+            ji_base = 1.80 * player.attack_power * player.agility
             ji_mods = 1.0 + player.versatility
             if getattr(player, 'has_hit_combo', False):
                 ji_mods *= (1.0 + player.hit_combo_stacks * 0.01)
-            # Universal Energy (Nature)
             if getattr(player, 'has_universal_energy', False):
                 ji_mods *= 1.15
             if player.zenith_active and getattr(player, 'has_weapon_of_wind', False):
@@ -230,21 +263,19 @@ class Spell:
                 'crit': is_crit_ji
             })
 
-        # TotM Consumption (BOK)
+        # TotM Consumption
         if self.abbr == 'BOK' and player.has_totm:
             if player.totm_stacks > 0:
                 extra_hits = player.totm_stacks
-                # 0.847 * AP * Agility
                 dmg_per_hit = 0.847 * player.attack_power * player.agility
 
                 hc_mod = 1.0
                 if getattr(player, 'has_hit_combo', False):
                     hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
 
-                is_crit = random.random() < (player.crit + self.bonus_crit_chance + (player.teb_active_bonus if player.zenith_active else 0.0)) # Approx
+                is_crit = random.random() < (player.crit + self.bonus_crit_chance + (player.teb_active_bonus if player.zenith_active else 0.0))
                 crit_m = (2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus) if is_crit else 1.0
 
-                # Weapon Wind
                 ww_mod = 1.10 if (player.zenith_active and getattr(player, 'has_weapon_of_wind', False)) else 1.0
 
                 total_extra = extra_hits * dmg_per_hit * (1 + player.versatility) * crit_m * hc_mod * ww_mod
@@ -280,9 +311,7 @@ class Spell:
                 should_proc_glory = True
 
             if should_proc_glory:
-                # 1.0 * AP * Agility
                 glory_dmg = 1.0 * player.attack_power * player.agility
-
                 hc_mod = 1.0
                 if getattr(player, 'has_hit_combo', False):
                     hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
@@ -311,17 +340,19 @@ class Spell:
                 dur = 20.0
             player.zenith_duration = dur
 
+            # [Shado-Pan] Stand Ready
+            if getattr(player, 'has_stand_ready', False):
+                player.stand_ready_active = True
+                # Removed max_flurry_charges limit
+                player.flurry_charges += 10
+
             if other_spells and 'RSK' in other_spells:
                 other_spells['RSK'].current_cd = 0
             player.chi = min(player.max_chi, player.chi + 2)
 
-            # [Task 2] TEB Consumption
-            # 消耗: 在 Zenith.cast 中，消耗所有 teb_stacks。
-            # Buff: 设置 player.teb_active_bonus = consumed_stacks * 0.02。
             consumed_stacks = player.teb_stacks
             player.teb_stacks = 0
             player.teb_active_bonus = consumed_stacks * 0.02
-            # Note: teb_active_bonus applies to Crit Chance during Zenith active (handled in calculate_tick_damage)
 
             # Zenith Blast
             zenith_burst = 10.0 * player.attack_power * player.agility
@@ -330,6 +361,10 @@ class Spell:
                  hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
 
             ww_mod = 1.10 if (getattr(player, 'has_weapon_of_wind', False)) else 1.0
+
+            # Weapons of the Wall (Shado-Pan)
+            if getattr(player, 'has_weapons_of_the_wall', False):
+                 ww_mod *= 1.20
 
             zenith_burst = zenith_burst * (1.0 + player.versatility) * hc_mod * ww_mod
             zenith_final = self._apply_aoe_scaling(zenith_burst, player, 'soft_cap')
@@ -347,27 +382,23 @@ class Spell:
             player.xuen_duration = 24.0
             player.update_stats()
 
-        # [Task 2] Flurry of Xuen
+        # Flurry of Xuen
         if getattr(player, 'has_flurry_of_xuen', False):
             should_proc_fox = False
             is_guaranteed = (self.abbr == 'Xuen')
             if is_guaranteed:
                 should_proc_fox = True
-            elif random.random() < 0.10: # Assumed 10% or PPM
+            elif random.random() < 0.10:
                 should_proc_fox = True
 
             if should_proc_fox:
-                # 3.92 * AP * Agility (Physical)
                 fox_base = 3.92 * player.attack_power * player.agility
                 fox_mod = 1.0 + player.versatility
 
-                # Check for guaranteed crit from Xuen cast
                 fox_crit_chance = player.crit
                 if is_guaranteed:
                     fox_crit_chance = 1.0
 
-                # Apply AOE 5 targets decrement (use soft cap or custom?)
-                # Prompt: "AOE 5目标递减" -> standard Soft Cap logic usually.
                 fox_final = self._apply_aoe_scaling(fox_base * fox_mod, player, 'soft_cap')
 
                 crit_m = 2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus
@@ -424,11 +455,9 @@ class Spell:
                 breakdown['extra_events'] = extra_damage_details
                 breakdown['extra_damage_total'] = extra_damage
 
-            # [Task 3: RSK consuming RWK]
             if self.abbr == 'RSK' and getattr(player, 'rwk_ready', False):
-                 player.rwk_ready = False # Consume
+                 player.rwk_ready = False
 
-            # [Task 3: Xuen's Battlegear - RSK Crit -> FOF CD reduction]
             if self.abbr == 'RSK' and getattr(player, 'has_xuens_battlegear', False):
                 crit_c = breakdown['final_crit']
                 if random.random() < crit_c:
@@ -437,30 +466,86 @@ class Spell:
 
             return total_damage, breakdown
 
+    def _calculate_flurry_strikes_damage(self, player, stacks, scale=1.0):
+        # Base: 0.6 AP per stack
+        flurry_base = 0.6 * player.attack_power * player.agility * stacks * scale
+
+        # Physical Mitigation
+        mitigation = player.get_physical_mitigation()
+        flurry_base *= mitigation
+
+        # Mods
+        f_mod = 1.0 + player.versatility
+
+        # Pride of Pandaria
+        crit_c = player.crit
+        if getattr(player, 'has_pride_of_pandaria', False):
+            crit_c += 0.15
+
+        crit_mult = 2.0
+
+        # Weapons of the Wall? No specific mention for Flurry.
+
+        flurry_total = flurry_base * f_mod * (1 + (crit_c * (crit_mult - 1)))
+
+        # Shado Over Battlefield (Nature AOE)
+        sob_total = 0.0
+        if getattr(player, 'has_shado_over_battlefield', False):
+            sob_base = 0.52 * player.attack_power * player.agility * stacks # attached to each strike? Assuming yes.
+            sob_mod = 1.0 + player.versatility
+            if getattr(player, 'has_universal_energy', False):
+                sob_mod *= 1.15
+
+            # Soft Cap 8
+            sob_scale = self._get_aoe_modifier(player.target_count, 8)
+
+            sob_total = sob_base * sob_mod * player.target_count * sob_scale * (1 + (crit_c * (crit_mult - 1)))
+
+        # High Impact (Physical AOE)
+        hi_total = 0.0
+        if getattr(player, 'has_high_impact', False):
+            hi_base = 1.0 * player.attack_power * player.agility * stacks
+            hi_mod = 1.0 + player.versatility
+            # Physical -> No Univ Energy
+
+            hi_scale = self._get_aoe_modifier(player.target_count, 8)
+
+            hi_total = hi_base * hi_mod * player.target_count * hi_scale * (1 + (crit_c * (crit_mult - 1)))
+
+        return flurry_total, sob_total, hi_total
+
+    def _get_aoe_modifier(self, target_count, soft_cap):
+        if target_count <= soft_cap:
+            return 1.0
+        else:
+            return math.sqrt(soft_cap / float(target_count))
+
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
-        # [Task 4] Apply Agility
-        # RWK Check: If this is RSK and rwk_ready is true, we simulate RWK properties
         is_rwk = (self.abbr == 'RSK' and getattr(player, 'rwk_ready', False))
 
-        # RWK Coeff: 1.7975 * AP
         current_ap_coeff = self.tick_coeff
         if is_rwk:
             current_ap_coeff = 1.7975
 
         base_dmg_per_target = current_ap_coeff * player.attack_power * player.agility
 
-        modifiers = [] # List of strings "Name: x1.0"
-        crit_sources = [] # List of strings "Name: 10%"
+        modifiers = []
+        crit_sources = []
 
         # 1. Multipliers
         current_mult = 1.0
+
+        # Mitigation for Physical
+        if self.damage_type == 'Physical' and not is_rwk: # RWK is Nature
+             mitigation = player.get_physical_mitigation()
+             current_mult *= mitigation
+             modifiers.append(f"PhysicalDR: x{mitigation:.3f}")
 
         # Base Modifiers List
         for name, val in self.modifiers:
             current_mult *= val
             modifiers.append(f"{name}: x{val:.2f}")
 
-        # RWK Dmg Bonus: 1 + 0.06 * target_count (Max 30% -> 5 targets)
         if is_rwk:
              rwk_bonus = min(0.30, 0.06 * player.target_count)
              if rwk_bonus > 0:
@@ -468,14 +553,12 @@ class Spell:
                  current_mult *= mod_val
                  modifiers.append(f"RWK_Targets: x{mod_val:.2f}")
 
-        # DoCJ SCK
         if self.abbr == 'SCK':
              is_docj = getattr(player, 'channel_docj_snapshot', False)
              if is_docj:
                  current_mult *= 2.0
                  modifiers.append("DanceOfChiJi: x2.00")
 
-        # Hidden Auras
         hidden_mod = 1.0
         if self.abbr == 'RSK': hidden_mod *= 1.70
         if self.abbr == 'SCK': hidden_mod *= 1.10
@@ -483,7 +566,6 @@ class Spell:
             current_mult *= hidden_mod
             modifiers.append(f"HiddenAura: x{hidden_mod:.2f}")
 
-        # Global Aura
         aura_mod = 1.04
         if self.abbr in ['TP', 'BOK', 'RSK', 'SCK', 'FOF', 'WDP', 'SOTWL']:
             aura_mod *= 1.04
@@ -491,36 +573,30 @@ class Spell:
             current_mult *= aura_mod
             modifiers.append(f"Aura: x{aura_mod:.2f}")
 
-        # Shadowboxing
         if self.abbr == 'BOK' and getattr(player, 'has_shadowboxing', False):
             current_mult *= 1.05
             modifiers.append("Shadowboxing: x1.05")
 
-        # Hit Combo
         if getattr(player, 'has_hit_combo', False) and player.hit_combo_stacks > 0:
             hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
             current_mult *= hc_mod
             modifiers.append(f"HitCombo({player.hit_combo_stacks}): x{hc_mod:.2f}")
 
-        # Communion with Wind (Dmg +10%)
         if self.abbr in ['SOTWL', 'WDP'] and getattr(player, 'has_communion_with_wind', False):
              current_mult *= 1.10
              modifiers.append("Communion: x1.10")
 
-        # Weapon of the Wind (Zenith Active -> +10%)
         if player.zenith_active and getattr(player, 'has_weapon_of_wind', False):
             current_mult *= 1.10
             modifiers.append("WeaponOfWind: x1.10")
 
-        # Universal Energy (Nature/Magic +15%)
         is_nature = (self.damage_type == 'Nature')
-        if is_rwk: is_nature = True # RWK overrides RSK Physical
+        if is_rwk: is_nature = True
 
         if is_nature and getattr(player, 'has_universal_energy', False):
              current_mult *= 1.15
              modifiers.append("UniversalEnergy: x1.15")
 
-        # Memory of Monastery (TP +15%)
         if self.abbr == 'TP' and getattr(player, 'has_memory_of_monastery', False):
              current_mult *= 1.15
              modifiers.append("MemoryOfMonastery: x1.15")
@@ -539,7 +615,6 @@ class Spell:
             self.is_channeled and player.channel_mastery_snapshot)
         if apply_mastery:
             m_mod = (1.0 + player.mastery)
-            # [Task 3: Sunfire Spiral]
             if self.abbr == 'RSK' and getattr(player, 'has_sunfire_spiral', False):
                 m_mod = 1.0 + (player.mastery * 1.2)
                 modifiers.append(f"Mastery(Sunfire): x{m_mod:.2f}")
@@ -555,7 +630,7 @@ class Spell:
         base_crit = player.crit
         crit_sources.append(f"PlayerStat: {base_crit*100:.1f}%")
 
-        bonus_crit = self.bonus_crit_chance # Legacy
+        bonus_crit = self.bonus_crit_chance
         if bonus_crit > 0:
              crit_sources.append(f"LegacyBonus: {bonus_crit*100:.1f}%")
 
@@ -563,25 +638,21 @@ class Spell:
             bonus_crit += val
             crit_sources.append(f"{name}: {val*100:.1f}%")
 
-        # Xuen's Battlegear (RSK +20%)
         if self.abbr == 'RSK' and getattr(player, 'has_xuens_battlegear', False):
              bonus_crit += 0.20
              crit_sources.append("XuensBattlegear: 20.0%")
 
-        # [Task 2] Skyfire Heel (RSK Crit)
         if self.abbr == 'RSK' and getattr(player, 'has_skyfire_heel', False):
-            # bonus_crit += min(0.20, 0.04 * player.target_count)
             sfh_bonus = min(0.20, 0.04 * player.target_count)
             bonus_crit += sfh_bonus
             crit_sources.append(f"SkyfireHeel: {sfh_bonus*100:.1f}%")
 
-        # [Task 2] TEB Active Bonus
         if player.zenith_active:
              bonus_crit += player.teb_active_bonus
              crit_sources.append(f"TEB(Active): {player.teb_active_bonus*100:.1f}%")
 
         final_crit_chance = min(1.0, base_crit + bonus_crit)
-        crit_mult = 2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus # TEB Crit Dmg
+        crit_mult = 2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus
 
         # Expected Value
         expected_dmg_single = (base_dmg_per_target * current_mult) * (1 + (final_crit_chance * (crit_mult - 1)))
@@ -593,12 +664,8 @@ class Spell:
         elif self.abbr == 'BOK' and getattr(player, 'has_shadowboxing', False):
             current_aoe_type = 'cleave'
 
-        # [Task 2] Skyfire Heel (Cleave)
         skyfire_cleave = 0.0
         if self.abbr == 'RSK' and getattr(player, 'has_skyfire_heel', False):
-             # 10% to neighbors (max 5 targets)
-             # "total_dmg = base_dmg + (base_dmg * 0.10 * min(player.target_count - 1, 5))"
-             # Wait, logic is applied on expected_dmg_single
              if player.target_count > 1:
                  extra_count = min(player.target_count - 1, 5)
                  skyfire_cleave = expected_dmg_single * 0.10 * extra_count
@@ -609,7 +676,7 @@ class Spell:
 
         breakdown = {
             'base': int(base_dmg_per_target),
-            'modifiers': modifiers, # Now a list of strings
+            'modifiers': modifiers,
             'crit_sources': crit_sources,
             'final_crit': final_crit_chance,
             'crit_mult': crit_mult,
@@ -617,6 +684,8 @@ class Spell:
             'targets': player.target_count,
             'total_dmg_after_aoe': total_expected_dmg
         }
+
+        # Add Source: Flurry Stack if applicable (Not here, this is Tick Damage)
 
         return total_expected_dmg, breakdown
 
@@ -633,11 +702,7 @@ class Spell:
             return total
 
         elif aoe_type == 'soft_cap':
-            if target_count <= 5:
-                return damage_per_target * target_count
-            else:
-                reduced_dmg = damage_per_target * math.sqrt(5.0 / target_count)
-                return reduced_dmg * target_count
+            return damage_per_target * target_count * self._get_aoe_modifier(target_count, 5)
 
         elif aoe_type == 'uncapped':
              return damage_per_target * target_count
@@ -711,8 +776,8 @@ class SpellBook:
             'SCK': Spell('SCK', 3.52, name="Spinning Crane Kick", chi_cost=2, is_channeled=True, ticks=4, cast_time=1.5, cast_haste=True, category='Minor Filler', aoe_type='soft_cap', damage_type='Physical'),
             'FOF': Spell('FOF', 2.07 * fof_max_ticks, name="Fists of Fury", chi_cost=3, cd=24.0, cd_haste=True, is_channeled=True,
                          ticks=fof_max_ticks, cast_time=4.0, cast_haste=True, req_talent=True, category='Major Filler', aoe_type='soft_cap', damage_type='Physical'),
-            'WDP': SpellWDP('WDP', 5.40, name="Whirling Dragon Punch", cd=30.0, req_talent=True, category='Minor Cooldown', aoe_type='soft_cap', damage_type='Physical'), # Assuming Physical
-            'SOTWL': Spell('SOTWL', 15.12, name="Strike of the Windlord", chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown', aoe_type='soft_cap', damage_type='Physical'), # Assuming Physical
+            'WDP': SpellWDP('WDP', 5.40, name="Whirling Dragon Punch", cd=30.0, req_talent=True, category='Minor Cooldown', aoe_type='soft_cap', damage_type='Physical'),
+            'SOTWL': Spell('SOTWL', 15.12, name="Strike of the Windlord", chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown', aoe_type='soft_cap', damage_type='Physical'),
             'SW': Spell('SW', 8.96, name="Slicing Winds", cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown', aoe_type='single', damage_type='Physical'),
             'Xuen': Spell('Xuen', 0.0, name="Invoke Xuen", cd=120.0, req_talent=True, gcd_override=0.0, category='Major Cooldown'),
             'Zenith': Spell('Zenith', 0.0, name="Zenith", cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown', aoe_type='soft_cap', damage_type='Nature'),

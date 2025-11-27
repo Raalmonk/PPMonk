@@ -47,9 +47,7 @@ class SpellModTalent(Talent):
     def apply(self, player, spell_book):
         if self.spell_abbr in spell_book.spells:
             spell = spell_book.spells[self.spell_abbr]
-            # Use specific methods if attr_name matches new list system
             if self.attr_name == 'damage_multiplier':
-                # Map to add_modifier
                  val = 1.0 + self.value if self.is_percentage else self.value
                  spell.add_modifier(self.name, val)
             elif self.attr_name == 'bonus_crit_chance':
@@ -220,88 +218,66 @@ class InnerPeaceTalent(Talent):
         if 'TP' in spell_book.spells:
             spell_book.spells['TP'].energy_cost = 45
 
-# --- Rows 8 & 9 (New Talents) ---
+# --- Rows 8 & 9 ---
 
 class SequencedStrikesTalent(Talent):
-    """8-2: Sequenced Strikes"""
     def apply(self, player, spell_book):
         player.has_sequenced_strikes = True
 
 class SunfireSpiralTalent(Talent):
-    """8-3: Sunfire Spiral (RSK Mastery +20%)"""
     def apply(self, player, spell_book):
         player.has_sunfire_spiral = True
 
 class CommunionWithWindTalent(Talent):
-    """8-4: Communion with Wind"""
     def apply(self, player, spell_book):
         player.has_communion_with_wind = True
 
 class RevolvingWhirlTalent(Talent):
-    """8-5 (Choice 1): Revolving Whirl"""
     def apply(self, player, spell_book):
         player.has_revolving_whirl = True
 
 class EchoTechniqueTalent(Talent):
-    """8-5 (Choice 2): Echo Technique"""
     def apply(self, player, spell_book):
         player.has_echo_technique = True
 
 class UniversalEnergyTalent(Talent):
-    """8-6: Universal Energy"""
     def apply(self, player, spell_book):
         player.has_universal_energy = True
 
 class MemoryOfMonasteryTalent(Talent):
-    """8-7: Memory of the Monastery"""
     def apply(self, player, spell_book):
         player.has_memory_of_monastery = True
-        # TP damage +15% is handled in Spell logic or here.
-        # Better handled in Spell.calculate_tick_damage via flag or just add modifier here?
-        # The prompt says "TP Dmg +15%", "Proc 10%".
-        # I added flag 'has_memory_of_monastery' and logic in SpellBook.
 
 class RushingWindKickTalent(Talent):
-    """9-2: Rushing Wind Kick"""
     def apply(self, player, spell_book):
         player.has_rushing_wind_kick = True
 
 class XuensBattlegearTalent(Talent):
-    """9-3: Xuen's Battlegear"""
     def apply(self, player, spell_book):
         player.has_xuens_battlegear = True
 
 class ThunderfistTalent(Talent):
-    """9-4: Thunderfist"""
     def apply(self, player, spell_book):
         player.has_thunderfist = True
 
 class WeaponOfTheWindTalent(Talent):
-    """9-5: Weapon of the Wind"""
     def apply(self, player, spell_book):
         player.has_weapon_of_wind = True
 
 class KnowledgeBrokenTempleTalent(Talent):
-    """9-6: Knowledge of the Broken Temple"""
     def apply(self, player, spell_book):
         player.has_knowledge_of_broken_temple = True
         player.max_totm_stacks = 8
 
 class JadefireStompTalent(Talent):
-    """9-8: Jadefire Stomp"""
     def apply(self, player, spell_book):
         player.has_jadefire_stomp = True
 
-
-# --- Task 3: Row 10 & TEB ---
-
 class TigereyeBrewTalent(Talent):
-    """8-1 / 9-1: Tiger Eye Brew Stacking"""
     def apply(self, player, spell_book):
         player.has_teb_stacking = True
 
 class TigereyeBrewDamageTalent(Talent):
-    """9-1 Layer 2: TEB Crit Damage"""
     def __init__(self, name, rank=2):
         super().__init__(name)
         self.rank = rank
@@ -309,39 +285,31 @@ class TigereyeBrewDamageTalent(Talent):
         player.teb_crit_dmg_bonus += 0.10 * self.rank
 
 class SkyfireHeelTalent(Talent):
-    """10-2: Skyfire Heel"""
     def apply(self, player, spell_book):
         player.has_skyfire_heel = True
 
 class HarmonicComboTalent(Talent):
-    """10-3: Harmonic Combo"""
     def apply(self, player, spell_book):
         if 'FOF' in spell_book.spells:
             fof = spell_book.spells['FOF']
-            # Dmg -10%
             fof.add_modifier(self.name, 0.90)
-            # Chi Cost = 2
             fof.chi_cost = 2
 
 class FlurryOfXuenTalent(Talent):
-    """10-4: Flurry of Xuen"""
     def apply(self, player, spell_book):
         player.has_flurry_of_xuen = True
 
 class MartialAgilityTalent(Talent):
-    """10-5: Martial Agility"""
     def apply(self, player, spell_book):
         player.has_martial_agility = True
 
 class AirborneRhythmTalent(Talent):
-    """10-6: Airborne Rhythm"""
     def apply(self, player, spell_book):
         if 'SW' in spell_book.spells:
             sw = spell_book.spells['SW']
             sw.chi_gen = 2
 
 class HurricanesVaultTalent(Talent):
-    """10-6_b: Hurricane's Vault"""
     def apply(self, player, spell_book):
         if 'SW' in spell_book.spells:
             sw = spell_book.spells['SW']
@@ -350,15 +318,77 @@ class HurricanesVaultTalent(Talent):
             sw.add_modifier(self.name, 2.0)
 
 class PathOfJadeTalent(Talent):
-    """10-7: Path of Jade"""
     def apply(self, player, spell_book):
         player.has_path_of_jade = True
 
 class SingularlyFocusedJadeTalent(Talent):
-    """10-7_b: Singularly Focused Jade"""
     def apply(self, player, spell_book):
         player.has_singularly_focused_jade = True
 
+# --- Shado-Pan Hero Talents ---
+
+class ShadoPanBaseTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_shado_pan_base = True
+        player.flurry_charges = 0
+        # Stacking logic is in Player.advance_time
+
+class PrideOfPandariaTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_pride_of_pandaria = True
+
+class HighImpactTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_high_impact = True
+
+class VeteransEyeTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_veterans_eye = True
+        # Logic in Player.update_stats
+
+class MartialPrecisionTalent(Talent):
+    def apply(self, player, spell_book):
+        player.armor_pen += 0.12
+
+class ShadoOverTheBattlefieldTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_shado_over_battlefield = True
+
+class OneVersusManyTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_one_versus_many = True
+        if 'FOF' in spell_book.spells:
+            spell_book.spells['FOF'].add_modifier(self.name, 1.20)
+
+class StandReadyTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_stand_ready = True
+
+class AgainstAllOddsTalent(Talent):
+    def apply(self, player, spell_book):
+        player.agility *= 1.04
+        player.attack_power = player.agility # Update AP immediately
+
+class EfficientTrainingTalent(Talent):
+    def apply(self, player, spell_book):
+        if 'TP' in spell_book.spells:
+            spell_book.spells['TP'].add_modifier(self.name, 1.20)
+        if 'Zenith' in spell_book.spells:
+            spell_book.spells['Zenith'].base_cd -= 10.0
+
+class VigilantWatchTalent(Talent):
+    def apply(self, player, spell_book):
+        if 'BOK' in spell_book.spells:
+            spell_book.spells['BOK'].crit_damage_bonus += 0.30
+
+class WeaponsOfTheWallTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_weapons_of_the_wall = True
+        # Logic applied in SpellBook (Zenith damage)
+
+class WisdomOfTheWallTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_wisdom_of_the_wall = True
 
 # --- 完整数据库 ---
 TALENT_DB = {
@@ -411,7 +441,7 @@ TALENT_DB = {
     '8-2': SequencedStrikesTalent('Sequenced Strikes'),
     '8-3': SunfireSpiralTalent('Sunfire Spiral'),
     '8-4': CommunionWithWindTalent('Communion with Wind'),
-    '8-5': RevolvingWhirlTalent('Revolving Whirl'), # Default choice
+    '8-5': RevolvingWhirlTalent('Revolving Whirl'),
     '8-5_b': EchoTechniqueTalent('Echo Technique'),
     '8-6': UniversalEnergyTalent('Universal Energy'),
     '8-7': MemoryOfMonasteryTalent('Memory of Monastery'),
@@ -427,14 +457,7 @@ TALENT_DB = {
     '9-8': JadefireStompTalent('Jadefire Stomp'),
 
     # Row 10
-    '10-1': PlaceholderTalent('TEB Final'), # Merged into 8-1/9-1? TEB is a system. Prompt implies full system.
-    # The prompt listed "Tiger Eye Brew (TEB) 机制" under Task 2, and "TigereyeBrewTalent" under Task 3.
-    # I have implemented TigereyeBrewTalent (8-1) and TigereyeBrewDamageTalent (9-1).
-    # 10-1 is likely just the final node that might grant more bonuses or just existence?
-    # Usually the system is unlocked early. I'll leave 10-1 as placeholder unless user specified.
-    # The user prompt for Task 3: "TigereyeBrewTalent: 开启 Player 的叠层逻辑. TigereyeBrewDamageTalent (第二层): 增加 player.teb_crit_dmg_bonus".
-    # It didn't mention 10-1 specifically differently.
-
+    '10-1': PlaceholderTalent('TEB Final'),
     '10-2': SkyfireHeelTalent('Skyfire Heel'),
     '10-3': HarmonicComboTalent('Harmonic Combo'),
     '10-4': FlurryOfXuenTalent('Flurry of Xuen'),
@@ -443,6 +466,21 @@ TALENT_DB = {
     '10-6_b': HurricanesVaultTalent('Hurricane\'s Vault'),
     '10-7': PathOfJadeTalent('Path of Jade'),
     '10-7_b': SingularlyFocusedJadeTalent('Singularly Focused Jade'),
+
+    # Shado-Pan (Hero Talents)
+    'ShadoPanBase': ShadoPanBaseTalent('Shado-Pan'),
+    'PrideOfPandaria': PrideOfPandariaTalent('Pride of Pandaria'),
+    'HighImpact': HighImpactTalent('High Impact'),
+    'VeteransEye': VeteransEyeTalent('Veterans Eye'),
+    'MartialPrecision': MartialPrecisionTalent('Martial Precision'),
+    'ShadoOverTheBattlefield': ShadoOverTheBattlefieldTalent('Shado Over the Battlefield'),
+    'OneVersusMany': OneVersusManyTalent('One Versus Many'),
+    'StandReady': StandReadyTalent('Stand Ready'),
+    'AgainstAllOdds': AgainstAllOddsTalent('Against All Odds'),
+    'EfficientTraining': EfficientTrainingTalent('Efficient Training'),
+    'VigilantWatch': VigilantWatchTalent('Vigilant Watch'),
+    'WeaponsOfTheWall': WeaponsOfTheWallTalent('Weapons of the Wall'),
+    'WisdomOfTheWall': WisdomOfTheWallTalent('Wisdom of the Wall'),
 
     # Shortcuts
     'WDP': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
