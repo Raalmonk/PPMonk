@@ -125,15 +125,11 @@ class Spell:
 
         player.gcd_remaining = self.gcd_override if self.gcd_override is not None else 1.0
 
-        # --- Mastery Calculation Fix ---
-        # 1. Calculate triggers_mastery (using OLD last_spell_name)
+        # --- Mastery Calculation Fix (Task 1) ---
+        # 1. Calculate mastery boolean BEFORE updating last_spell_name
         triggers_mastery = False
         if self.is_combo_strike:
-            # If last_spell_name is None, it means start of fight -> No mastery?
-            # Usually first spell does NOT trigger mastery unless explicit rule.
-            # Assuming standard monk mastery: Previous spell must be different.
-            # If no previous spell, mastery does not trigger.
-            if player.last_spell_name is not None and player.last_spell_name != self.abbr:
+            if player.last_spell_name is None or player.last_spell_name != self.abbr:
                 triggers_mastery = True
 
         # 2. Update Hit Combo State based on this calculation
@@ -419,7 +415,7 @@ class Spell:
             return 0.0, {'base': 0, 'modifiers': [], 'crit_sources': [], 'extra_events': extra_damage_details}
         else:
             # 4. Pass triggers_mastery as the override
-            base_dmg, breakdown = self.calculate_tick_damage(player, mastery_override=triggers_mastery, use_expected_value=use_expected_value, force_crit=force_proc_glory)
+            base_dmg, breakdown = self.calculate_tick_damage(player, mastery_override=triggers_mastery, use_expected_value=use_expected_value, force_crit=force_proc_glory) # Assuming force_proc_glory implies crit for some spells, or we can add a separate param
 
             total_damage = base_dmg + extra_damage
             if extra_damage_details:
@@ -537,14 +533,13 @@ class Spell:
             current_mult *= hc_mod
             modifiers.append(f"HitCombo({player.hit_combo_stacks}): x{hc_mod:.2f}")
 
-        # Mastery Logic Update
+        # Task 1: Mastery Logic Update
         apply_mastery = False
         if mastery_override is not None:
             apply_mastery = mastery_override
         else:
              # Preview mode (Sandbox hover): Check if current spell is different from last
              if self.is_combo_strike:
-                # Logic: If I am combo strike, and my abbr != last_spell, mastery = True
                 apply_mastery = (player.last_spell_name is not None) and (player.last_spell_name != self.abbr)
              elif self.is_channeled:
                  apply_mastery = player.channel_mastery_snapshot
@@ -596,16 +591,13 @@ class Spell:
         if self.abbr == 'RSK' and getattr(player, 'has_skyfire_heel', False) and player.target_count > 1:
              total_dmg += snapshot_dmg * 0.10 * min(player.target_count - 1, 5)
 
-        # Detailed Breakdown
+        # Task 4: Detailed Breakdown
         breakdown = {
-            "Raw Base": raw_base, # Capitalized as per task hint, though 'Raw Base' is usually display name
-            "raw_base": raw_base, # Keep lower for compatibility
+            "raw_base": raw_base,
             "components": f"Coeff {current_ap_coeff:.3f} * AP {player.attack_power} * Agi {player.agility}",
             "modifiers": modifiers,
-            "Expected": expected_dmg,
-            "expected_dmg": expected_dmg,
-            "Snapshot": snapshot_dmg,
-            "snapshot_dmg": snapshot_dmg,
+            "expected_dmg": expected_dmg, # Single Target Expected
+            "snapshot_dmg": snapshot_dmg, # Single Target Snapshot
             "is_crit": is_crit_hit,
             "final_crit": final_crit_chance,
             "crit_mult": crit_mult,
@@ -653,7 +645,6 @@ class CelestialConduit(Spell):
              total = base * mult * player.target_count * scale * (crit_m if is_crit else 1.0)
 
         breakdown = {
-            'Raw Base': base,
             'raw_base': base,
             'components': f"5.0 * 2.75 * AP {player.attack_power} * Agi {player.agility}",
             'modifiers': [f"Scale: {scale:.2f}"],
@@ -676,7 +667,6 @@ class TouchOfDeath(Spell):
         final_dmg = base_dmg * current_mult
 
         breakdown = {
-            'Raw Base': base_dmg,
             'raw_base': base_dmg,
             'components': "35% Max HP",
             'modifiers': [f"Mult: x{current_mult:.2f}"],

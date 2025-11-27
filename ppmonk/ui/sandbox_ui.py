@@ -8,7 +8,7 @@ from ppmonk.core.spell_book import SpellBook
 class DraggableBlock:
     def __init__(self, canvas, item_id, data, on_click, on_drag_end, on_right_click):
         self.canvas = canvas
-        self.item_id = item_id # Canvas ID (tag)
+        self.item_id = item_id # Canvas ID
         self.data = data # Dictionary with spell info
         self.on_click = on_click
         self.on_drag_end = on_drag_end
@@ -31,9 +31,16 @@ class DraggableBlock:
         if not self.dragging:
             self.dragging = True
             self.canvas.lift(self.item_id) # Bring to front
+            # Lift text too (assumed next ID or stored)
 
         dx = event.x - self.start_x
         self.canvas.move(self.item_id, dx, 0)
+        # Move text associated with this block
+        # (Simplified: In the main loop we will redraw everything, but for smooth drag we move raw items)
+        # To simplify this implementation, we will just redraw on release instead of complex group moving.
+        # But wait, we need visuals.
+        # We will move the rectangle. The text will lag unless we group them.
+        # Let's rely on the redraw on release for sorting, but for dragging feedback we need to move the rect.
         self.start_x = event.x
 
     def _on_release(self, event):
@@ -65,7 +72,6 @@ class SandboxWindow(ctk.CTkToplevel):
         self.block_height = 50
         self.block_gap = 5
         self.lane_y = 100
-        self.block_map = {}
 
         self._build_ui()
         self._init_spellbook()
@@ -132,6 +138,7 @@ class SandboxWindow(ctk.CTkToplevel):
 
         for key in spell_keys:
             # Check if known? For now, we show all, simulation will validation error them if unknown.
+            # Better to check known from ref_spell_book
             if key in self.ref_spell_book.spells: # Only show spells in book (talents applied)
                  if self.ref_spell_book.spells[key].is_known:
                      btn = ctk.CTkButton(self.palette_scroll, text=self.ref_spell_book.spells[key].name,
@@ -171,14 +178,7 @@ class SandboxWindow(ctk.CTkToplevel):
             text += f"Time: {res['timestamp']:.2f}s\n"
             if 'breakdown' in res:
                 bd = res['breakdown']
-                text += f"\nBreakdown:\n"
-                for k, v in bd.items():
-                    if k == 'modifiers':
-                         text += f"  Modifiers: {', '.join(v)}\n"
-                    elif k == 'crit_sources':
-                         text += f"  Crit Sources: {', '.join(v)}\n"
-                    else:
-                         text += f"  {k}: {v}\n"
+                text += f"\nBreakdown:\n{json.dumps(bd, indent=2, default=str)}\n"
 
         self.info_box.configure(state="normal")
         self.info_box.delete("1.0", "end")
@@ -187,10 +187,20 @@ class SandboxWindow(ctk.CTkToplevel):
 
     def _on_drag_end(self, item_id, final_x):
         # Calculate new index based on x
+        # canvas x can be scrolled, need to account for scroll?
+        # event.x is relative to canvas window top-left visible?
+        # Actually in Tkinter Canvas bind, event.x is window coord. canvasx converts to scrollspace.
+
         scroll_x = self.canvas.canvasx(final_x)
         new_index = int(scroll_x // (self.block_width + self.block_gap))
 
-        # Find the data object corresponding to this visual block
+        # Find who holds this item_id
+        # We need to map item_id back to data index
+        # This is tricky because we redraw everything.
+        # But wait, we passed 'data' to the block wrapper.
+
+        # Simplification: Find the data object corresponding to this visual block
+        # We will iterate our map (which we need to build during draw)
         target_data = self.block_map.get(item_id)
 
         if target_data and target_data in self.action_sequence:
@@ -200,18 +210,20 @@ class SandboxWindow(ctk.CTkToplevel):
                 self.action_sequence.insert(new_index, self.action_sequence.pop(current_index))
                 self._recalculate_timeline()
             else:
-                self._draw_sequence() # Snap back
+                # Snap back
+                self._draw_sequence()
 
     def _export_json(self):
         out = json.dumps(self.action_sequence, indent=2)
+        # In a real app, file dialog. Here, print to console or info box
         print("EXPORT JSON:")
         print(out)
         self.info_box.configure(state="normal")
         self.info_box.delete("1.0", "end")
         self.info_box.insert("1.0", "Check Console for JSON Output (or copy here):\n" + out)
-        self.info_box.configure(state="disabled")
 
     def _import_json(self):
+        # Dialog asking for input
         dialog = ctk.CTkInputDialog(text="Paste JSON here:", title="Import Sequence")
         txt = dialog.get_input()
         if txt:
@@ -260,7 +272,9 @@ class SandboxWindow(ctk.CTkToplevel):
             # Check usability
             if not spell.is_usable(self.sim_player, self.sim_spell_book.spells):
                 item['error'] = "Not Ready / No Resources"
-                # Visualization: Red block, no cast
+                # Even if invalid, we continue simulation time? No, we stop or skip?
+                # User usually wants to see it fail.
+                # We will NOT execute the cast, just mark it red.
                 continue
 
             # Cast
@@ -293,7 +307,7 @@ class SandboxWindow(ctk.CTkToplevel):
 
     def _draw_sequence(self):
         self.canvas.delete("all")
-        self.block_map = {} # item_id (tag) -> data
+        self.block_map = {} # item_id -> data
 
         x = 10
         for i, item in enumerate(self.action_sequence):
@@ -302,7 +316,7 @@ class SandboxWindow(ctk.CTkToplevel):
             text = item['name']
 
             if 'error' in item:
-                color = "#922B21" # Red
+                color = "#922B21"
                 text += "\n(!)"
             elif item['name'] == "WAIT_0_5":
                 color = "#555555"
@@ -311,13 +325,19 @@ class SandboxWindow(ctk.CTkToplevel):
             rect_id = self.canvas.create_rectangle(x, self.lane_y, x + self.block_width, self.lane_y + self.block_height, fill=color, outline=outline, width=2)
             text_id = self.canvas.create_text(x + self.block_width/2, self.lane_y + self.block_height/2, text=text, fill="white", font=("Arial", 10, "bold"))
 
-            # Bind events via unique tag
+            # Bind events via helper
+            # We bind to the RECTANGLE. The text ignores events or we bind to it too?
+            # Canvas tag binding can cover both if we tag them.
             tag = f"item_{item['uuid']}"
             self.canvas.itemconfig(rect_id, tags=tag)
             self.canvas.itemconfig(text_id, tags=tag)
 
             DraggableBlock(self.canvas, tag, item, self._on_block_click, self._on_drag_end, self._remove_item)
 
+            # For mapping back
+            # Note: The DraggableBlock uses the TAG, so 'item_id' passed to _on_drag_end will be the tag or the object ID?
+            # It passes the tag or id depending on how we set it. DraggableBlock init takes `item_id`.
+            # We are passing the tag.
             self.block_map[tag] = item
 
             # Info text below (Time, DMG)
