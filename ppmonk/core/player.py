@@ -2,7 +2,7 @@ import random
 
 
 class PlayerState:
-    def __init__(self, agility=2000.0, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw'):
+    def __init__(self, agility=2000.0, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw', max_health=100000.0):
         self.rating_crit = rating_crit
         self.rating_haste = rating_haste
         self.rating_mastery = rating_mastery
@@ -12,6 +12,10 @@ class PlayerState:
         # [新] 武器与攻击强度
         self.weapon_type = weapon_type  # '2h' or 'dw'
         self.attack_power = agility  # 基础 AP = 敏捷
+
+        # [新] 生命值与目标 (Task 2)
+        self.max_health = max_health
+        self.target_health_pct = 1.0
 
         self.base_mastery = 0.19
         self.base_crit = 0.10
@@ -31,6 +35,10 @@ class PlayerState:
         self.talent_crit_bonus = 0.0
         self.combat_wisdom_ready = False
         self.combat_wisdom_timer = 0.0
+
+        # [新] Momentum Boost State (Task 3)
+        self.momentum_buff_active = False
+        self.momentum_buff_duration = 0.0
 
         self.last_spell_name = None
         self.gcd_remaining = 0.0
@@ -52,9 +60,15 @@ class PlayerState:
         self.has_dual_threat = False
         self.has_totm = False
         self.has_glory_of_the_dawn = False
+        self.has_momentum_boost = False # Task 3
+        self.has_cyclones_drift = False # Task 4 (6-2)
+        self.has_hit_combo = False # Task 4 (5-5)
 
         # [新] 禅院教诲层数
         self.totm_stacks = 0
+
+        # [新] Hit Combo Stacks (Task 4)
+        self.hit_combo_stacks = 0
 
         # [新] 自动攻击计时器
         self.swing_timer = 0.0
@@ -74,7 +88,23 @@ class PlayerState:
         self.crit = raw_crit + crit_bonus
 
         self.versatility = (self.rating_vers / 5400.0)
-        self.haste = (self.rating_haste / 4400.0)
+
+        # [新] Cyclone's Drift (Task 4)
+        raw_haste = (self.rating_haste / 4400.0)
+        if self.has_cyclones_drift:
+            self.haste = raw_haste * 1.10 # Multiplicative? Standard WoW logic usually (1+rating)*(1+pct)-1 but prompt says "haste = raw_haste * 1.10"
+            # Prompt text: "haste = raw_haste * 1.10". Wait, raw_haste is a percentage (e.g. 0.20).
+            # If I have 20% haste, 10% more is usually 22% (1.2 * 1.1 = 1.32 -> 32%) or additive 30%.
+            # Prompt says: "Multiplicative... realization: haste = raw_haste * 1.10".
+            # If raw_haste is 0.1, result 0.11. This implies it scales the RATING conversion.
+            # Usually Haste = Rating% * Buffs.
+            # Let's interpret strictly as prompt: "haste = raw_haste * 1.10"
+            # Actually, standard formula is (1 + RatingPct) * (1 + BuffPct) - 1.
+            # But the prompt explicitly wrote: `haste = raw_haste * 1.10`.
+            # I will follow the prompt's code implementation instruction.
+            self.haste = raw_haste * 1.10
+        else:
+            self.haste = raw_haste
 
         dr_threshold = 1380
         eff_mast_rating = self.rating_mastery
@@ -110,9 +140,22 @@ class PlayerState:
                 self.zenith_duration -= step
                 if self.zenith_duration <= 0:
                     self.zenith_active = False
+
+            # [新] Momentum Boost Buff Tracking
+            if self.momentum_buff_active:
+                self.momentum_buff_duration -= step
+                if self.momentum_buff_duration <= 0:
+                    self.momentum_buff_active = False
+
             self.swing_timer -= step
             if self.swing_timer <= 0:
-                self.swing_timer += self.base_swing_time / (1.0 + self.haste)
+                # [新] Momentum Boost Attack Speed Logic
+                swing_speed_mod = 1.0 + self.haste
+                if self.momentum_buff_active:
+                    swing_speed_mod *= 1.6 # "Attack speed increased by 60%" -> Interval / 1.6
+
+                self.swing_timer += self.base_swing_time / swing_speed_mod
+
                 is_dual_threat = self.has_dual_threat and random.random() < 0.30
 
                 # Base Damage Calculation
@@ -178,6 +221,12 @@ class PlayerState:
                         })
 
                 if self.channel_time_remaining <= 1e-6 or self.channel_ticks_remaining <= 0:
+                    # [新] Momentum Boost Trigger
+                    # "When FOF channel completes (or ends)..."
+                    if self.current_channel_spell.abbr == 'FOF' and self.has_momentum_boost:
+                        self.momentum_buff_active = True
+                        self.momentum_buff_duration = 8.0
+
                     self.is_channeling = False
                     self.current_channel_spell = None
                     self.channel_mastery_snapshot = False
