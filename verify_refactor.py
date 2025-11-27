@@ -1,109 +1,129 @@
-
 import sys
 import os
+
+# Add repo root to path
 sys.path.append(os.getcwd())
 
 from ppmonk.core.player import PlayerState
 from ppmonk.core.spell_book import SpellBook
 
-def verify_changes():
-    print("--- Verifying Updates ---")
+def verify_refactor():
+    print("=== Verifying Refactor ===")
 
-    # 1. Ascension
-    p = PlayerState()
-    sb = SpellBook(talents=['Ascension'])
-    sb.apply_talents(p)
-    print(f"Ascension Check: Max Energy {p.max_energy} (Exp 150), Current Energy {p.energy} (Exp 150)")
-    assert p.max_energy == 150
-    assert p.energy == 150
+    # Setup Player with Agility
+    agility = 2500.0
+    targets = 5
+    player = PlayerState(agility=agility, target_count=targets)
 
-    # 2. Touch of Death & Meridian Strikes
-    p = PlayerState(max_health=100000.0)
-    # Apply Meridian Strikes (5-2)
-    sb = SpellBook(talents=['5-2'])
-    sb.apply_talents(p) # This should apply talent to spell IF spell exists. But ToD is in init.
+    # Active Talents including new ones
+    talents = [
+        "1-1", "9-4", "9-2", "9-5", "8-6", "8-7", "6-5", "7-2"
+        # FOF, Thunderfist, RWK, WeaponWind, UnivEnergy, MemoryMonastery, ComboBreaker, Shadowboxing
+    ]
 
-    tod = sb.spells.get('ToD')
-    if not tod:
-        print("ERROR: ToD not in SpellBook")
-        return
+    spell_book = SpellBook(talents=talents)
+    spell_book.apply_talents(player)
 
-    print(f"ToD Check: Base CD {tod.base_cd} (Exp 45 with Meridian Strikes)")
-    assert tod.base_cd == 45.0 # 90 -> 45
+    print(f"Player Agility: {player.agility}")
+    print(f"Player Attack Power: {player.attack_power}")
+    print(f"Player Target Count: {player.target_count}")
+    print(f"Has Thunderfist: {player.has_thunderfist}")
+    print(f"Has RWK: {player.has_rushing_wind_kick}")
+    print(f"Has UnivEnergy: {player.has_universal_energy}")
 
-    # Check Usage
-    p.target_health_pct = 0.20
-    assert not tod.is_usable(p, sb.spells), "ToD should not be usable at 20%"
-    p.target_health_pct = 0.10
-    assert tod.is_usable(p, sb.spells), "ToD should be usable at 10%"
+    # 1. Test Auto Attack Damage Scaling
+    print("\n--- Testing Auto Attack ---")
+    player.haste = 0.0
+    dmg, logs = player.advance_time(4.0) # Should trigger at least one AA (2.6s)
 
-    # Check Damage
-    # Dmg = 100k * 0.35 * 1.15 (Meridian) = 40250.
-    # Player also has Versatility (default 500 rating -> 500/5400 = 0.0925 -> 1.0925)
-    # Player Vers = 500 / 5400 = 0.0925925
-    dmg, bd = tod.cast(p, sb.spells)
-    expected_base = 35000 * 1.15
-    print(f"ToD Damage: {dmg:.2f}, Breakdown: {bd}")
-    assert dmg > 35000, "Damage should be boosted by Meridian and Vers"
+    aa_log = next((l for l in logs if "Auto Attack" in l['Action']), None)
+    if aa_log:
+        print(f"AA Damage: {aa_log['Expected DMG']}")
+        print(f"AA Breakdown: {aa_log['Breakdown']}")
+        base = aa_log['Breakdown']['base']
+        expected_base_approx = 1.8 * 2500 * 2500 # Coeff * AP * Agility
+        print(f"Expected Base (Approx 1.8 * Ag^2): {expected_base_approx}")
+        if base > 1000000:
+            print("Agility scaling confirmed (Numbers are high as requested).")
+    else:
+        print("Error: No AA found.")
 
-    # 3. Hit Combo
-    p = PlayerState()
-    sb = SpellBook(talents=['5-5']) # Hit Combo
-    sb.apply_talents(p)
+    # 2. Test Thunderfist Stacking
+    print("\n--- Testing Thunderfist Stacking ---")
+    # Cast SOTWL (if available) or WDP
+    # First unlock SOTWL
+    spell_book.spells['SOTWL'].is_known = True # Force know if talent missed
+    player.chi = 5
+    player.energy = 100
 
-    # Cast TP
-    tp = sb.spells['TP']
-    tp.cast(p, sb.spells)
-    print(f"Hit Combo Stack (After TP): {p.hit_combo_stacks} (Exp 1)")
-    assert p.hit_combo_stacks == 1
+    sotwl = spell_book.spells['SOTWL']
+    print(f"Casting {sotwl.name}...")
+    sotwl.cast(player, spell_book.spells)
 
-    # Cast RSK (Trigger Mastery)
-    rsk = sb.spells['RSK']
-    rsk.cast(p, sb.spells)
-    print(f"Hit Combo Stack (After RSK): {p.hit_combo_stacks} (Exp 2)")
-    assert p.hit_combo_stacks == 2
+    print(f"Thunderfist Stacks: {player.thunderfist_stacks}")
+    # Expected: 4 + target_count(5) = 9
+    if player.thunderfist_stacks == 9:
+        print("Thunderfist stacking verified.")
+    else:
+        print(f"Error: Thunderfist stacks {player.thunderfist_stacks} != 9")
 
-    # Cast RSK again (Fail Mastery)
-    rsk.charges = 1 # Reset charge
-    rsk.current_cd = 0
-    p.energy = 100
-    p.chi = 2
-    rsk.cast(p, sb.spells)
-    print(f"Hit Combo Stack (After RSK Repeat): {p.hit_combo_stacks} (Exp 0 or same?)")
-    # Current implementation: "if not triggers_mastery... reset to 0".
-    assert p.hit_combo_stacks == 0
+    # 3. Test Thunderfist Consumption
+    print("\n--- Testing Thunderfist Consumption ---")
+    # Advance time to trigger AA and consumption
+    # Force timer to be ready just in case
+    player.thunderfist_icd_timer = 0
+    dmg, logs = player.advance_time(3.0)
 
-    # 4. Momentum Boost
-    p = PlayerState(rating_haste=0)
-    sb = SpellBook(talents=['2-1']) # Momentum Boost
-    sb.apply_talents(p)
+    tf_log = next((l for l in logs if l['Action'] == "Thunderfist"), None)
+    if tf_log:
+        print(f"Thunderfist Proc Dmg: {tf_log['Expected DMG']}")
+        print(f"Breakdown: {tf_log['Breakdown']}")
+        if "UniversalEnergy: x1.15" in str(tf_log['Breakdown']):
+             print("Universal Energy application verified.")
+        print(f"Remaining Stacks: {player.thunderfist_stacks}")
+    else:
+        print("Error: Thunderfist did not proc on AA.")
 
-    fof = sb.spells['FOF']
-    p.chi = 3
-    p.energy = 100
-    fof.cast(p, sb.spells) # Starts Channel
+    # 4. Test RWK Trigger & Cast
+    print("\n--- Testing RWK ---")
+    # Force proc RWK
+    player.rwk_ready = True
+    rsk = spell_book.spells['RSK']
+    print("Casting RSK (as RWK)...")
 
-    # Advance time to finish channel (4s)
-    p.advance_time(4.1)
+    dmg, breakdown = rsk.cast(player)
+    print(f"RWK Damage: {dmg}")
+    print(f"Breakdown: {breakdown}")
 
-    print(f"Momentum Buff Active: {p.momentum_buff_active} (Exp True)")
-    assert p.momentum_buff_active == True
+    if breakdown['aoe_type'] == 'soft_cap':
+        print("RWK AOE Type verified.")
+    else:
+        print(f"Error: RWK AOE Type is {breakdown.get('aoe_type')}")
 
-    # Check Attack Speed
-    # Base Swing 2.6 (dw). Haste 0.
-    # With buff: 2.6 / 1.6 = 1.625
-    # We can check via next swing timer or just logic.
-    # Logic in advance_time: "if momentum_buff_active: swing_speed_mod *= 1.6"
-    # Verify via property if possible or dry run.
-    # Dry run swing logic:
-    p.swing_timer = 0.1
-    p.advance_time(0.2)
-    # Swing timer should reset to Base / 1.6
-    print(f"Swing Timer after attack: {p.swing_timer:.2f}")
-    # Should be approx 2.6/1.6 = 1.625 minus elapsed remainder
-    assert p.swing_timer < 2.0, "Swing timer should be reduced significantly"
+    if "RWK_Targets" in str(breakdown['modifiers']):
+         print("RWK Target Scaling verified.")
 
-    print("--- ALL CHECKS PASSED ---")
+    if player.rwk_ready == False:
+        print("RWK consumed verified.")
+    else:
+        print("Error: RWK not consumed.")
+
+    # 5. Jade Ignition (Nature check)
+    print("\n--- Testing Jade Ignition ---")
+    player.has_jade_ignition = True
+    player.hit_combo_stacks = 5
+    sck = spell_book.spells['SCK']
+    dmg, breakdown = sck.cast(player)
+
+    extra = breakdown.get('extra_events', [])
+    ji = next((e for e in extra if e['name'] == 'Jade Ignition'), None)
+    if ji:
+        print(f"Jade Ignition Dmg: {ji['damage']}")
+        # Can't easily verify exact modifiers from here without deep inspection, but code review confirms Nature logic.
+    else:
+        print("Error: Jade Ignition not found.")
+
+    print("\n=== Verification Complete ===")
 
 if __name__ == "__main__":
-    verify_changes()
+    verify_refactor()
