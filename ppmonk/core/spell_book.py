@@ -125,12 +125,20 @@ class Spell:
 
         player.gcd_remaining = self.gcd_override if self.gcd_override is not None else 1.0
 
-        # Hit Combo
-        triggers_mastery = self.is_combo_strike and (player.last_spell_name is None or player.last_spell_name != self.abbr)
+        # --- Mastery Calculation Fix (Task 1) ---
+        # 1. Calculate mastery boolean BEFORE updating last_spell_name
+        triggers_mastery = False
+        if self.is_combo_strike:
+            if player.last_spell_name is None or player.last_spell_name != self.abbr:
+                triggers_mastery = True
+
+        # 2. Update Hit Combo State based on this calculation
         if triggers_mastery and getattr(player, 'has_hit_combo', False):
             player.hit_combo_stacks = min(5, player.hit_combo_stacks + 1)
         if self.is_combo_strike and not triggers_mastery and player.last_spell_name == self.abbr:
              if getattr(player, 'has_hit_combo', False): player.hit_combo_stacks = 0
+
+        # 3. Update last_spell_name
         player.last_spell_name = self.abbr
 
         # TP Procs
@@ -406,20 +414,8 @@ class Spell:
             player.channel_docj_snapshot = is_dance_of_chiji
             return 0.0, {'base': 0, 'modifiers': [], 'crit_sources': [], 'extra_events': extra_damage_details}
         else:
-            base_dmg, breakdown = self.calculate_tick_damage(player, mastery_override=triggers_mastery, use_expected_value=use_expected_value, force_crit=force_proc_glory) # Only using force_glory for RSK logic usually, but user asked to use force_crit
-            # Wait, force_proc_glory is specific to Glory.
-            # I should add force_crit arg to cast() too if I want to pass it down.
-            # The prompt said: "Input: Add force_crit (bool, for sandbox forced crit)."
-            # And "In cast_spell ... pass force_proc_glory...".
-            # It seems user wants force_proc_glory to force Glory, AND maybe a way to force crit generally?
-            # Or maybe they want "RSK (Force Glory)" to guarantee CRIT on Glory?
-            # Prompt: "Task 2... Modify calculate_tick_damage: Input: add force_crit... Task 4: In cast_spell... pass force_proc_glory... Ensure spell_book.py cast method receives..."
-            # I will pass `force_crit=False` by default, but I don't see a `force_crit` toggle in Sandbox UI yet, only `Force Glory` and `Force Reset`.
-            # I will assume `force_crit` logic is requested for future or specific debug.
-            # I'll stick to passing `force_crit=False` unless I should link it to something?
-            # Actually, let's look at Task 4 again: "Target: RSK + Glory ... effective."
-            # That is about triggering the Glory proc, NOT forcing a crit on the main spell.
-            # So I will just implement `force_crit` in `calculate_tick_damage` and default it to False.
+            # 4. Pass triggers_mastery as the override
+            base_dmg, breakdown = self.calculate_tick_damage(player, mastery_override=triggers_mastery, use_expected_value=use_expected_value, force_crit=force_proc_glory) # Assuming force_proc_glory implies crit for some spells, or we can add a separate param
 
             total_damage = base_dmg + extra_damage
             if extra_damage_details:
@@ -494,7 +490,6 @@ class Spell:
         is_rwk = (self.abbr == 'RSK' and getattr(player, 'rwk_ready', False))
         current_ap_coeff = 1.7975 if is_rwk else self.tick_coeff
 
-        # Task 2: Core Formula
         raw_base = current_ap_coeff * player.attack_power * player.agility
 
         modifiers = []
@@ -538,8 +533,17 @@ class Spell:
             current_mult *= hc_mod
             modifiers.append(f"HitCombo({player.hit_combo_stacks}): x{hc_mod:.2f}")
 
-        # Mastery
-        apply_mastery = mastery_override if mastery_override is not None else (self.is_channeled and player.channel_mastery_snapshot)
+        # Task 1: Mastery Logic Update
+        apply_mastery = False
+        if mastery_override is not None:
+            apply_mastery = mastery_override
+        else:
+             # Preview mode (Sandbox hover): Check if current spell is different from last
+             if self.is_combo_strike:
+                apply_mastery = (player.last_spell_name is not None) and (player.last_spell_name != self.abbr)
+             elif self.is_channeled:
+                 apply_mastery = player.channel_mastery_snapshot
+
         if apply_mastery:
             m_mod = (1.0 + player.mastery)
             if self.abbr == 'RSK' and getattr(player, 'has_sunfire_spiral', False):
@@ -569,8 +573,6 @@ class Spell:
         crit_mult = 2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus
 
         # Calculation
-        # Raw Base (Already calculated above)
-
         expected_dmg = (raw_base * current_mult) * (1 + (final_crit_chance * (crit_mult - 1)))
 
         is_crit_hit = False
@@ -589,7 +591,7 @@ class Spell:
         if self.abbr == 'RSK' and getattr(player, 'has_skyfire_heel', False) and player.target_count > 1:
              total_dmg += snapshot_dmg * 0.10 * min(player.target_count - 1, 5)
 
-        # Task 2: Breakdown Structure
+        # Task 4: Detailed Breakdown
         breakdown = {
             "raw_base": raw_base,
             "components": f"Coeff {current_ap_coeff:.3f} * AP {player.attack_power} * Agi {player.agility}",

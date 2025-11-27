@@ -327,11 +327,6 @@ class SingularlyFocusedJadeTalent(Talent):
 
 # --- Shado-Pan Hero Talents ---
 
-class ShadoPanBaseTalent(Talent):
-    def apply(self, player, spell_book):
-        player.has_shado_pan_base = True
-        player.flurry_charges = 0
-
 class PrideOfPandariaTalent(Talent):
     def apply(self, player, spell_book):
         player.has_pride_of_pandaria = True
@@ -365,7 +360,6 @@ class StandReadyTalent(Talent):
 class AgainstAllOddsTalent(Talent):
     def apply(self, player, spell_book):
         player.agility *= 1.04
-        # AP remains 1.0
 
 class EfficientTrainingTalent(Talent):
     def apply(self, player, spell_book):
@@ -387,6 +381,22 @@ class WisdomOfTheWallTalent(Talent):
     def apply(self, player, spell_book):
         player.has_wisdom_of_the_wall = True
 
+class ShadoPanBaseTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_shado_pan_base = True
+        player.flurry_charges = 0
+        # Automatically apply all non-choice passives for Shado-Pan
+        VeteransEyeTalent('Auto').apply(player, spell_book)
+        MartialPrecisionTalent('Auto').apply(player, spell_book)
+        ShadoOverTheBattlefieldTalent('Auto').apply(player, spell_book)
+        OneVersusManyTalent('Auto').apply(player, spell_book)
+        StandReadyTalent('Auto').apply(player, spell_book)
+        AgainstAllOddsTalent('Auto').apply(player, spell_book)
+        EfficientTrainingTalent('Auto').apply(player, spell_book)
+        VigilantWatchTalent('Auto').apply(player, spell_book)
+        WeaponsOfTheWallTalent('Auto').apply(player, spell_book)
+        WisdomOfTheWallTalent('Auto').apply(player, spell_book)
+
 
 # --- Conduit of the Celestials (COTC) Hero Talents ---
 
@@ -395,11 +405,6 @@ class CelestialConduitTalent(Talent):
         player.has_celestial_conduit = True
         if 'Conduit' in spell_book.spells:
             spell_book.spells['Conduit'].is_known = True
-
-class COTCBaseTalent(Talent):
-    def apply(self, player, spell_book):
-        player.has_cotc_base = True
-        # Unlock Xuen features
 
 class XuensBondTalent(Talent):
     def apply(self, player, spell_book):
@@ -444,6 +449,19 @@ class PathOfFallingStarTalent(Talent):
 class UnityWithinTalent(Talent):
     def apply(self, player, spell_book):
         player.has_unity_within = True
+
+class COTCBaseTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_cotc_base = True
+        # Unlock Xuen features
+        # Automatically apply all non-choice passives for COTC
+        CelestialConduitTalent('Auto').apply(player, spell_book)
+        HeartOfJadeSerpentTalent('Auto').apply(player, spell_book)
+        StrengthOfBlackOxTalent('Auto').apply(player, spell_book)
+        InnerCompassTalent('Auto').apply(player, spell_book)
+        CourageOfWhiteTigerTalent('Auto').apply(player, spell_book)
+        PathOfFallingStarTalent('Auto').apply(player, spell_book)
+        UnityWithinTalent('Auto').apply(player, spell_book)
 
 # --- 完整数据库 ---
 TALENT_DB = {
@@ -526,6 +544,7 @@ TALENT_DB = {
     'ShadoPanBase': ShadoPanBaseTalent('Shado-Pan'),
     'PrideOfPandaria': PrideOfPandariaTalent('Pride of Pandaria'),
     'HighImpact': HighImpactTalent('High Impact'),
+    # Individual passives kept for reference, but applied by Base now
     'VeteransEye': VeteransEyeTalent('Veterans Eye'),
     'MartialPrecision': MartialPrecisionTalent('Martial Precision'),
     'ShadoOverTheBattlefield': ShadoOverTheBattlefieldTalent('Shado Over the Battlefield'),
@@ -556,6 +575,8 @@ TALENT_DB = {
     'SW': UnlockSpellTalent('Slicing Winds', 'SW'),
     'SOTWL': UnlockSpellTalent('Strike of the Windlord', 'SOTWL'),
     'Ascension': AscensionTalent('Ascension'),
+    'hero-sp-header': ShadoPanBaseTalent('Shado-Pan'),
+    'hero-cotc-header': COTCBaseTalent('Conduit of the Celestials (Base)')
 }
 
 class TalentManager:
