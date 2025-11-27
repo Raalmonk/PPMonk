@@ -130,34 +130,22 @@ class PlayerState:
                 crit_mult = 2.0
                 dmg_mod = 1.0 + self.versatility
 
-                # E[D] logic
-                crit_impact = (1 + (crit_chance * (crit_mult - 1)))
-                expected_dmg = (base_dmg * dmg_mod) * crit_impact
+                expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
                 total_damage += expected_dmg
 
                 key = "Dual Threat" if is_dual_threat else "Auto Attack"
                 if damage_meter is not None:
                     damage_meter[key] = damage_meter.get(key, 0) + expected_dmg
 
-                # Structure Breakdown
-                modifiers = {
-                    'Vers': 1.0 + self.versatility,
-                    'Crit_Exp': crit_impact
-                }
-
-                breakdown = {
-                    'base': base_dmg,
-                    'modifiers': modifiers,
-                    'crit_chance': crit_chance,
-                    'final_damage': expected_dmg
-                }
-
+                breakdown = f"(Base: {int(base_dmg)}, Vers: {self.versatility*100:.1f}%, Crit: {crit_chance*100:.1f}%)"
                 log_entries.append({
                     "Action": key,
+                    "Base": base_dmg,
+                    "Dmg Mod": dmg_mod,
+                    "Crit%": crit_chance,
+                    "Crit Mult": crit_mult,
                     "Expected DMG": expected_dmg,
-                    "Breakdown": breakdown,
-                    "source": "passive",
-                    "timestamp": elapsed  # Relative timestamp
+                    "Breakdown": breakdown
                 })
 
             if self.is_channeling:
@@ -178,9 +166,7 @@ class PlayerState:
                         log_entries.append({
                             "Action": f"{spell.abbr} (Tick)",
                             "Expected DMG": tick_dmg,
-                            "Breakdown": breakdown,
-                            "source": "passive",
-                            "timestamp": elapsed # Relative timestamp
+                            "Breakdown": breakdown
                         })
 
                 if self.channel_time_remaining <= 1e-6 or self.channel_ticks_remaining <= 0:

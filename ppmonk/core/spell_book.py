@@ -143,12 +143,6 @@ class Spell:
                 if damage_meter is not None:
                     damage_meter['Glory of Dawn'] = damage_meter.get('Glory of Dawn', 0) + final_glory
 
-                extra_damage_details.append({
-                    'name': 'Glory of the Dawn',
-                    'damage': final_glory,
-                    'crit': is_crit
-                })
-
         if self.abbr == 'Zenith':
             player.zenith_active = True
             player.zenith_duration = 15.0
@@ -190,16 +184,15 @@ class Spell:
             player.channel_tick_interval = self.get_tick_interval(player)
             player.time_until_next_tick = player.channel_tick_interval
             player.channel_mastery_snapshot = triggers_mastery
-
-            return 0.0, {'base': 0, 'modifiers': {}, 'flags': ['Channeling']}
+            # Return empty string or "Channeling..." for breakdown
+            return 0.0, "(Channeling)"
         else:
             base_dmg, breakdown = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
             total_damage = base_dmg + extra_damage
 
-            # Merge extra damage into breakdown
+            # If extra damage happened, append to breakdown
             if extra_damage > 0:
-                breakdown['extra_damage'] = extra_damage_details
-                breakdown['total_damage'] = total_damage
+                breakdown += f" + Extra: {int(extra_damage)}"
 
             return total_damage, breakdown
 
@@ -242,46 +235,16 @@ class Spell:
         apply_mastery = mastery_override if mastery_override is not None else (
             self.is_channeled and player.channel_mastery_snapshot)
         if apply_mastery:
-            m_mod = (1.0 + player.mastery)
-            modifiers['Mastery'] = m_mod
-            dmg_mod *= m_mod
-            flags.append('Mastery')
-
-        v_mod = (1.0 + player.versatility)
-        modifiers['Vers'] = v_mod
-        dmg_mod *= v_mod
+            dmg_mod *= (1.0 + player.mastery)
+        dmg_mod *= (1.0 + player.versatility)
 
         crit_chance = min(1.0, player.crit + self.bonus_crit_chance)
         crit_mult = 2.0 + self.crit_damage_bonus
+        expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
 
-        is_crit = random.random() < crit_chance
-        # Deterministic Calculation requested previously,
-        # but Sandbox Task 1 says "Detailed Breakdown (Base, Mod, Crit etc)".
-        # Task 3 says breakdown should be struct dict.
-        # The prompt says "E[D] formula ... replacing random critical strike rolls." in Memory.
-        # But for Sandbox, usually people want to see hits.
-        # However, I should stick to Expected Damage logic if that's the core rule,
-        # OR since the user said "Breakdown ... {'Vers': 1.09, 'Crit': 2.0}",
-        # implying Crit is a modifier (Multiplier) in the breakdown.
+        breakdown_string = f"(Base: {int(base_dmg)}, Mod: {dmg_mod:.2f}, Crit: {crit_chance*100:.1f}%)"
 
-        # Let's keep Expected Damage logic as per memory and previous implementation.
-        # E[D] = (Base * Mod) * (1 + Chance * (Mult - 1))
-
-        crit_impact = (1 + (crit_chance * (crit_mult - 1)))
-        modifiers['Crit_Exp'] = crit_impact
-
-        expected_dmg = (base_dmg * dmg_mod) * crit_impact
-
-        breakdown = {
-            'base': base_dmg,
-            'modifiers': modifiers,
-            'flags': flags,
-            'crit_chance': crit_chance,
-            'crit_mult': crit_mult,
-            'final_damage': expected_dmg
-        }
-
-        return expected_dmg, breakdown
+        return expected_dmg, breakdown_string
 
     def tick_cd(self, dt):
         if self.charges < self.max_charges:
