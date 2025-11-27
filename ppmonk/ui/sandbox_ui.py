@@ -1,351 +1,405 @@
 import customtkinter as ctk
+import datetime
 import tkinter as tk
-import json
-import random
 from ppmonk.core.player import PlayerState
 from ppmonk.core.spell_book import SpellBook
-
-class DraggableBlock:
-    def __init__(self, canvas, item_id, data, on_click, on_drag_end, on_right_click):
-        self.canvas = canvas
-        self.item_id = item_id # Canvas ID
-        self.data = data # Dictionary with spell info
-        self.on_click = on_click
-        self.on_drag_end = on_drag_end
-        self.on_right_click = on_right_click
-
-        self.start_x = 0
-        self.dragging = False
-
-        self.canvas.tag_bind(item_id, "<Button-1>", self._on_press)
-        self.canvas.tag_bind(item_id, "<B1-Motion>", self._on_drag)
-        self.canvas.tag_bind(item_id, "<ButtonRelease-1>", self._on_release)
-        self.canvas.tag_bind(item_id, "<Button-3>", self._on_right_click)
-
-    def _on_press(self, event):
-        self.start_x = event.x
-        self.dragging = False
-        self.on_click(self.data) # Show info
-
-    def _on_drag(self, event):
-        if not self.dragging:
-            self.dragging = True
-            self.canvas.lift(self.item_id) # Bring to front
-            # Lift text too (assumed next ID or stored)
-
-        dx = event.x - self.start_x
-        self.canvas.move(self.item_id, dx, 0)
-        # Move text associated with this block
-        # (Simplified: In the main loop we will redraw everything, but for smooth drag we move raw items)
-        # To simplify this implementation, we will just redraw on release instead of complex group moving.
-        # But wait, we need visuals.
-        # We will move the rectangle. The text will lag unless we group them.
-        # Let's rely on the redraw on release for sorting, but for dragging feedback we need to move the rect.
-        self.start_x = event.x
-
-    def _on_release(self, event):
-        if self.dragging:
-            self.on_drag_end(self.item_id, event.x) # Pass final X to calculate new index
-        self.dragging = False
-
-    def _on_right_click(self, event):
-        self.on_right_click(self.data)
+import math
+import random
 
 class SandboxWindow(ctk.CTkToplevel):
     def __init__(self, parent, active_talents=None, player_stats=None):
         super().__init__(parent)
-        self.title("Sequence Editor")
+        self.title("Manual Sandbox")
         self.geometry("1400x850")
 
         self.active_talents = active_talents if active_talents else []
         self.player_stats = player_stats if player_stats else {}
 
-        # Core Data Structure
-        self.action_sequence = [] # List of dicts: {'name': 'RSK', 'settings': {}, 'uuid': ...}
+        self.player = None
+        self.spell_book = None
+        self.time_elapsed = 0.0
 
-        # Temporary State for Simulation
-        self.sim_player = None
-        self.sim_spell_book = None
+        self.event_history = []
 
-        # UI Constants
-        self.block_width = 80
-        self.block_height = 50
-        self.block_gap = 5
-        self.lane_y = 100
+        self.force_proc_glory = tk.BooleanVar(value=False)
+        self.force_proc_reset = tk.BooleanVar(value=False)
+        self.target_hp_pct = tk.DoubleVar(value=1.0)
+        self.target_count = tk.IntVar(value=1)
+
+        self.pixels_per_second = 50
+        self.row_height = 40
+        self.timeline_height = 400
+        self.active_lane_y = 40
+        self.derivative_lane_y = 90
+        self.passive_lane_y = 140
+        self.canvas_width = 5000
+
+        self.selection_start_x = 0
+        self.selection_rect = None
 
         self._build_ui()
-        self._init_spellbook()
-        self._recalculate_timeline()
-
-    def _init_spellbook(self):
-        # We need a reference spellbook just to get spell names/costs for the palette
-        # The actual simulation uses a fresh one each time.
-        self.ref_player = PlayerState() # Dummy
-        self.ref_spell_book = SpellBook(active_talents=self.active_talents)
-        self.ref_spell_book.apply_talents(self.ref_player)
+        self._reset_sandbox()
 
     def _build_ui(self):
-        # --- Top Controls ---
         top_panel = ctk.CTkFrame(self)
         top_panel.pack(fill="x", padx=10, pady=5)
 
-        ctk.CTkButton(top_panel, text="Clear Sequence", fg_color="#C0392B", command=self._clear_sequence).pack(side="left", padx=5)
-        ctk.CTkButton(top_panel, text="Export JSON", command=self._export_json).pack(side="left", padx=5)
-        ctk.CTkButton(top_panel, text="Import JSON", command=self._import_json).pack(side="left", padx=5)
+        ctk.CTkLabel(top_panel, text="Agility:").pack(side="left", padx=5)
+        self.agility_entry = ctk.CTkEntry(top_panel, width=80)
+        self.agility_entry.insert(0, str(self.player_stats.get('agility', 2000)))
+        self.agility_entry.pack(side="left", padx=5)
 
-        self.stats_label = ctk.CTkLabel(top_panel, text="Total DMG: 0 | DPS: 0", font=("Arial", 14, "bold"))
-        self.stats_label.pack(side="right", padx=20)
+        ctk.CTkLabel(top_panel, text="Target HP%:").pack(side="left", padx=5)
+        self.hp_slider = ctk.CTkSlider(top_panel, from_=0.0, to=1.0, number_of_steps=100, variable=self.target_hp_pct, command=self._on_hp_change, width=150)
+        self.hp_slider.pack(side="left", padx=5)
+        self.hp_label = ctk.CTkLabel(top_panel, text="100%")
+        self.hp_label.pack(side="left", padx=2)
 
-        # --- Main Content ---
+        ctk.CTkLabel(top_panel, text="Targets:").pack(side="left", padx=10)
+        self.target_slider = ctk.CTkSlider(top_panel, from_=1, to=20, number_of_steps=19, variable=self.target_count, command=self._on_target_change, width=150)
+        self.target_slider.pack(side="left", padx=5)
+        self.target_label = ctk.CTkLabel(top_panel, text="1")
+        self.target_label.pack(side="left", padx=2)
+
+        ctk.CTkButton(top_panel, text="Reset", command=self._reset_sandbox, fg_color="#C0392B", width=60).pack(side="left", padx=20)
+
+        self.status_label_chi = ctk.CTkLabel(top_panel, text="Chi: 0", font=("Arial", 14, "bold"), text_color="#F1C40F")
+        self.status_label_chi.pack(side="left", padx=15)
+        self.status_label_energy = ctk.CTkLabel(top_panel, text="Energy: 0", font=("Arial", 14, "bold"), text_color="#F39C12")
+        self.status_label_energy.pack(side="left", padx=15)
+        self.status_label_xuen = ctk.CTkLabel(top_panel, text="Xuen: Inactive", font=("Arial", 12), text_color="gray")
+        self.status_label_xuen.pack(side="left", padx=15)
+        self.status_label_buffs = ctk.CTkLabel(top_panel, text="", font=("Arial", 10), text_color="#A9DFBF")
+        self.status_label_buffs.pack(side="left", padx=15)
+
+        ctk.CTkCheckBox(top_panel, text="Force Glory", variable=self.force_proc_glory).pack(side="right", padx=10)
+        ctk.CTkCheckBox(top_panel, text="Force Reset", variable=self.force_proc_reset).pack(side="right", padx=10)
+
         content = ctk.CTkFrame(self)
         content.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Left: Spell Palette
-        palette_frame = ctk.CTkFrame(content, width=200)
-        palette_frame.pack(side="left", fill="y", padx=5, pady=5)
+        left_panel = ctk.CTkFrame(content, width=300)
+        left_panel.pack(side="left", fill="y", padx=5, pady=5)
+        ctk.CTkLabel(left_panel, text="Spells", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+        self.spells_frame = ctk.CTkScrollableFrame(left_panel)
+        self.spells_frame.pack(fill="both", expand=True)
 
-        ctk.CTkLabel(palette_frame, text="Spell Palette", font=("Arial", 16, "bold")).pack(pady=10)
-        self.palette_scroll = ctk.CTkScrollableFrame(palette_frame)
-        self.palette_scroll.pack(fill="both", expand=True)
+        right_panel = ctk.CTkFrame(content)
+        right_panel.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-        self._populate_palette()
+        tl_header = ctk.CTkFrame(right_panel, fg_color="transparent")
+        tl_header.pack(fill="x", pady=5)
+        ctk.CTkLabel(tl_header, text="Tactical Timeline", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
+        ctk.CTkButton(tl_header, text="+", width=30, command=self._zoom_in).pack(side="right", padx=2)
+        ctk.CTkButton(tl_header, text="-", width=30, command=self._zoom_out).pack(side="right", padx=2)
+        self.zoom_lbl = ctk.CTkLabel(tl_header, text="Zoom: 50")
+        self.zoom_lbl.pack(side="right", padx=5)
 
-        # Right: Sequence View
-        seq_frame = ctk.CTkFrame(content)
-        seq_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+        timeline_container = ctk.CTkFrame(right_panel)
+        timeline_container.pack(fill="both", expand=True)
+        self.canvas = tk.Canvas(timeline_container, bg="#2B2B2B", height=self.timeline_height, scrollregion=(0,0, self.canvas_width, self.timeline_height))
+        hbar = tk.Scrollbar(timeline_container, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        hbar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.canvas.config(xscrollcommand=hbar.set)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        ctk.CTkLabel(seq_frame, text="Action Sequence (Drag to Reorder, Right-Click to Delete)", font=("Arial", 14)).pack(pady=5)
+        self._draw_timeline_grid()
+        self.canvas.bind("<ButtonPress-3>", self._start_selection)
+        self.canvas.bind("<B3-Motion>", self._update_selection)
+        self.canvas.bind("<ButtonRelease-3>", self._end_selection)
 
-        self.canvas_container = ctk.CTkFrame(seq_frame)
-        self.canvas_container.pack(fill="both", expand=True)
+    def _on_hp_change(self, value):
+        self.hp_label.configure(text=f"{int(value*100)}%")
+        if self.player:
+            self.player.target_health_pct = value
+            self._update_button_visuals_only()
 
-        h_scroll = tk.Scrollbar(self.canvas_container, orient="horizontal")
-        self.canvas = tk.Canvas(self.canvas_container, bg="#2B2B2B", height=400, xscrollcommand=h_scroll.set)
-        h_scroll.config(command=self.canvas.xview)
+    def _on_target_change(self, value):
+        val = int(value)
+        self.target_label.configure(text=f"{val}")
+        if self.player: self.player.target_count = val
 
-        h_scroll.pack(side="bottom", fill="x")
-        self.canvas.pack(side="top", fill="both", expand=True)
+    def _zoom_in(self):
+        if self.pixels_per_second < 200:
+            self.pixels_per_second += 10
+            self._redraw_canvas()
 
-        # Info Box
-        self.info_box = ctk.CTkTextbox(seq_frame, height=150)
-        self.info_box.pack(fill="x", pady=5)
-        self.info_box.insert("1.0", "Click a block to see details...")
-        self.info_box.configure(state="disabled")
+    def _zoom_out(self):
+        if self.pixels_per_second > 20:
+            self.pixels_per_second -= 10
+            self._redraw_canvas()
 
-    def _populate_palette(self):
-        # Add buttons for spells
-        spell_keys = ["TP", "BOK", "RSK", "FOF", "WDP", "SCK", "SOTWL", "SW", "Xuen", "Zenith", "ToD", "Conduit"]
+    def _redraw_canvas(self):
+        self.zoom_lbl.configure(text=f"Zoom: {self.pixels_per_second}")
+        self.canvas.delete("all")
+        self._draw_timeline_grid()
+        for evt in self.event_history:
+            self._draw_block(evt['lane_y'], evt['start_time'], evt['duration'], evt['text'], evt['color'], evt['info'])
+        x = self.time_elapsed * self.pixels_per_second
+        self.canvas.coords(self.time_indicator, x, 0, x, self.timeline_height)
 
-        for key in spell_keys:
-            # Check if known? For now, we show all, simulation will validation error them if unknown.
-            # Better to check known from ref_spell_book
-            if key in self.ref_spell_book.spells: # Only show spells in book (talents applied)
-                 if self.ref_spell_book.spells[key].is_known:
-                     btn = ctk.CTkButton(self.palette_scroll, text=self.ref_spell_book.spells[key].name,
-                                         command=lambda k=key: self._add_to_sequence(k))
-                     btn.pack(pady=2, padx=5, fill="x")
+    def _reset_sandbox(self):
+        try:
+            agility = float(self.agility_entry.get())
+        except ValueError:
+            agility = 2000.0
+            self.agility_entry.delete(0, "end")
+            self.agility_entry.insert(0, "2000")
 
-        ctk.CTkLabel(self.palette_scroll, text="Controls").pack(pady=10)
-        ctk.CTkButton(self.palette_scroll, text="Wait 0.5s", fg_color="gray", command=lambda: self._add_to_sequence("WAIT_0_5")).pack(pady=2, padx=5, fill="x")
-
-    def _add_to_sequence(self, spell_key):
-        item = {
-            'name': spell_key,
-            'settings': {},
-            'uuid': random.randint(0, 1000000)
-        }
-        self.action_sequence.append(item)
-        self._recalculate_timeline()
-
-    def _clear_sequence(self):
-        self.action_sequence = []
-        self._recalculate_timeline()
-
-    def _remove_item(self, data):
-        if data in self.action_sequence:
-            self.action_sequence.remove(data)
-            self._recalculate_timeline()
-
-    def _on_block_click(self, data):
-        # Show details in info box
-        text = f"Action: {data['name']}\n"
-        if 'error' in data:
-            text += f"ERROR: {data['error']}\n"
-
-        if 'sim_result' in data:
-            res = data['sim_result']
-            text += f"Damage: {int(res['damage'])}\n"
-            text += f"Time: {res['timestamp']:.2f}s\n"
-            if 'breakdown' in res:
-                bd = res['breakdown']
-                text += f"\nBreakdown:\n{json.dumps(bd, indent=2, default=str)}\n"
-
-        self.info_box.configure(state="normal")
-        self.info_box.delete("1.0", "end")
-        self.info_box.insert("1.0", text)
-        self.info_box.configure(state="disabled")
-
-    def _on_drag_end(self, item_id, final_x):
-        # Calculate new index based on x
-        # canvas x can be scrolled, need to account for scroll?
-        # event.x is relative to canvas window top-left visible?
-        # Actually in Tkinter Canvas bind, event.x is window coord. canvasx converts to scrollspace.
-
-        scroll_x = self.canvas.canvasx(final_x)
-        new_index = int(scroll_x // (self.block_width + self.block_gap))
-
-        # Find who holds this item_id
-        # We need to map item_id back to data index
-        # This is tricky because we redraw everything.
-        # But wait, we passed 'data' to the block wrapper.
-
-        # Simplification: Find the data object corresponding to this visual block
-        # We will iterate our map (which we need to build during draw)
-        target_data = self.block_map.get(item_id)
-
-        if target_data and target_data in self.action_sequence:
-            current_index = self.action_sequence.index(target_data)
-            if new_index != current_index:
-                new_index = max(0, min(new_index, len(self.action_sequence)-1))
-                self.action_sequence.insert(new_index, self.action_sequence.pop(current_index))
-                self._recalculate_timeline()
-            else:
-                # Snap back
-                self._draw_sequence()
-
-    def _export_json(self):
-        out = json.dumps(self.action_sequence, indent=2)
-        # In a real app, file dialog. Here, print to console or info box
-        print("EXPORT JSON:")
-        print(out)
-        self.info_box.configure(state="normal")
-        self.info_box.delete("1.0", "end")
-        self.info_box.insert("1.0", "Check Console for JSON Output (or copy here):\n" + out)
-
-    def _import_json(self):
-        # Dialog asking for input
-        dialog = ctk.CTkInputDialog(text="Paste JSON here:", title="Import Sequence")
-        txt = dialog.get_input()
-        if txt:
-            try:
-                data = json.loads(txt)
-                if isinstance(data, list):
-                    self.action_sequence = data
-                    self._recalculate_timeline()
-            except Exception as e:
-                print(f"Import failed: {e}")
-
-    def _recalculate_timeline(self):
-        # 1. Reset Simulation
-        self.sim_player = PlayerState(
-            agility=self.player_stats.get('agility', 2000),
+        self.player = PlayerState(
+            agility=agility,
+            target_count=self.target_count.get(),
             rating_crit=self.player_stats.get('crit_rating', 2000),
             rating_haste=self.player_stats.get('haste_rating', 1500),
             rating_mastery=self.player_stats.get('mastery_rating', 1000),
             rating_vers=self.player_stats.get('vers_rating', 500)
         )
-        self.sim_spell_book = SpellBook(active_talents=self.active_talents)
-        self.sim_spell_book.apply_talents(self.sim_player)
+        self.player.target_health_pct = self.target_hp_pct.get()
 
-        time_elapsed = 0.0
-        total_damage = 0.0
+        talents_to_use = self.active_talents if self.active_talents else [
+            "1-1", "2-1", "2-2", "2-3", "3-1", "3-2", "3-3", "Ascension",
+            "4-1", "4-2", "4-3", "5-1", "5-2", "5-3", "5-4", "5-5", "5-6",
+            "6-1", "6-2", "6-2_b", "WDP", "SW", "SOTWL",
+            "8-1", "8-2", "8-3", "8-4", "8-5", "8-5_b", "8-6", "8-7",
+            "9-1", "9-2", "9-3", "9-4", "9-5", "9-8",
+            "10-2", "10-3", "10-4", "10-5", "10-6", "10-7"
+        ]
 
-        # 2. Iterate Sequence
-        for item in self.action_sequence:
-            name = item['name']
-            item.pop('error', None) # Clear previous errors
-            item.pop('sim_result', None)
+        self.spell_book = SpellBook(talents=talents_to_use)
+        self.spell_book.apply_talents(self.player)
 
-            if name == "WAIT_0_5":
-                self.sim_player.advance_time(0.5)
-                self.sim_spell_book.tick(0.5)
-                time_elapsed += 0.5
-                item['sim_result'] = {'damage': 0, 'timestamp': time_elapsed, 'breakdown': 'Wait 0.5s'}
-                continue
-
-            if name not in self.sim_spell_book.spells:
-                item['error'] = "Unknown Spell"
-                continue
-
-            spell = self.sim_spell_book.spells[name]
-
-            # Check usability
-            if not spell.is_usable(self.sim_player, self.sim_spell_book.spells):
-                item['error'] = "Not Ready / No Resources"
-                # Even if invalid, we continue simulation time? No, we stop or skip?
-                # User usually wants to see it fail.
-                # We will NOT execute the cast, just mark it red.
-                continue
-
-            # Cast
-            dmg, breakdown = spell.cast(self.sim_player, other_spells=self.sim_spell_book.spells, use_expected_value=True)
-            total_damage += dmg
-
-            # Advance Time
-            cast_time = max(self.sim_player.gcd_remaining, spell.get_effective_cast_time(self.sim_player))
-            # Advance logic
-            pdmg, events = self.sim_player.advance_time(cast_time, use_expected_value=True)
-            self.sim_spell_book.tick(cast_time)
-
-            time_elapsed += cast_time
-            # Add passive damage
-            for evt in events:
-                total_damage += evt.get('Expected DMG', 0)
-
-            item['sim_result'] = {
-                'damage': dmg,
-                'timestamp': time_elapsed,
-                'breakdown': breakdown
-            }
-
-        # 3. Update Stats
-        dps = total_damage / time_elapsed if time_elapsed > 0 else 0
-        self.stats_label.configure(text=f"Total DMG: {int(total_damage):,} | DPS: {int(dps):,}")
-
-        # 4. Redraw
-        self._draw_sequence()
-
-    def _draw_sequence(self):
+        self.time_elapsed = 0.0
+        self.event_history = []
         self.canvas.delete("all")
-        self.block_map = {} # item_id -> data
+        self._draw_timeline_grid()
+        self._update_status()
+        self._refresh_spell_buttons()
 
-        x = 10
-        for i, item in enumerate(self.action_sequence):
-            color = "#2E86C1"
-            outline = "black"
-            text = item['name']
+    def _draw_timeline_grid(self):
+        for i in range(0, 100):
+            x = i * self.pixels_per_second
+            color = "#404040" if i % 5 != 0 else "#606060"
+            self.canvas.create_line(x, 0, x, self.timeline_height, fill=color)
+            self.canvas.create_text(x + 2, self.timeline_height - 15, text=f"{i}s", anchor="w", fill="white", font=("Arial", 8))
+        self.canvas.create_text(5, self.active_lane_y - 20, text="Active Spells", anchor="w", fill="#3498DB", font=("Arial", 10, "bold"))
+        self.canvas.create_text(5, self.derivative_lane_y - 20, text="Derivative / Procs", anchor="w", fill="#D4AC0D", font=("Arial", 10, "bold"))
+        self.canvas.create_text(5, self.passive_lane_y - 20, text="Passive / Auto Attacks", anchor="w", fill="#95A5A6", font=("Arial", 10, "bold"))
+        self.time_indicator = self.canvas.create_line(0, 0, 0, self.timeline_height, fill="red", width=2)
 
-            if 'error' in item:
-                color = "#922B21"
-                text += "\n(!)"
-            elif item['name'] == "WAIT_0_5":
-                color = "#555555"
+    def _update_status(self):
+        self.status_label_chi.configure(text=f"Chi: {self.player.chi}")
+        self.status_label_energy.configure(text=f"Energy: {int(self.player.energy)}")
+        self.status_label_xuen.configure(text=f"Xuen: {self.player.xuen_duration:.1f}s" if self.player.xuen_active else "Xuen: Inactive", text_color="#3498DB" if self.player.xuen_active else "gray")
+        buffs = []
+        if self.player.combo_breaker_stacks > 0: buffs.append(f"ComboBreaker({self.player.combo_breaker_stacks})")
+        if self.player.dance_of_chiji_stacks > 0: buffs.append(f"DanceChiJi({self.player.dance_of_chiji_stacks})")
+        if self.player.hit_combo_stacks > 0: buffs.append(f"HitCombo({self.player.hit_combo_stacks})")
+        if self.player.thunderfist_stacks > 0: buffs.append(f"Thunderfist({self.player.thunderfist_stacks})")
+        if self.player.totm_stacks > 0: buffs.append(f"TotM({self.player.totm_stacks})")
+        if self.player.rwk_ready: buffs.append(f"RWK Ready")
+        if self.player.teb_stacks > 0: buffs.append(f"TEB({self.player.teb_stacks})")
+        self.status_label_buffs.configure(text=" | ".join(buffs))
+        self._update_button_visuals_only()
+        x = self.time_elapsed * self.pixels_per_second
+        self.canvas.coords(self.time_indicator, x, 0, x, self.timeline_height)
 
-            # Create Block
-            rect_id = self.canvas.create_rectangle(x, self.lane_y, x + self.block_width, self.lane_y + self.block_height, fill=color, outline=outline, width=2)
-            text_id = self.canvas.create_text(x + self.block_width/2, self.lane_y + self.block_height/2, text=text, fill="white", font=("Arial", 10, "bold"))
+    def _update_button_visuals_only(self):
+        for child in self.spells_frame.winfo_children():
+            if hasattr(child, "spell_key"): self._update_button_visual(child)
 
-            # Bind events via helper
-            # We bind to the RECTANGLE. The text ignores events or we bind to it too?
-            # Canvas tag binding can cover both if we tag them.
-            tag = f"item_{item['uuid']}"
-            self.canvas.itemconfig(rect_id, tags=tag)
-            self.canvas.itemconfig(text_id, tags=tag)
+    def _update_button_visual(self, btn):
+        key = btn.spell_key
+        if key not in self.spell_book.spells: return
+        spell = self.spell_book.spells[key]
+        if spell.current_cd > 0:
+            btn.configure(text=f"{spell.name} ({spell.current_cd:.1f}s)", fg_color="#555555", state="disabled")
+        elif not spell.is_usable(self.player, self.spell_book.spells):
+             btn.configure(text=f"{spell.name}", fg_color="#922B21", state="normal")
+        else:
+            btn.configure(text=f"{spell.name}", fg_color="#2E86C1", state="normal")
 
-            DraggableBlock(self.canvas, tag, item, self._on_block_click, self._on_drag_end, self._remove_item)
+    def _refresh_spell_buttons(self):
+        for widget in self.spells_frame.winfo_children(): widget.destroy()
+        spell_keys = ["TP", "BOK", "RSK", "FOF", "WDP", "SCK", "SOTWL", "SW", "Xuen", "Zenith", "ToD", "Conduit"]
+        for key in spell_keys:
+            if key in self.spell_book.spells:
+                spell = self.spell_book.spells[key]
+                btn = ctk.CTkButton(self.spells_frame, text=spell.name, command=lambda k=key: self._handle_cast_click(k))
+                btn.spell_key = key
+                btn.pack(pady=4, padx=5, fill="x")
+        if "RSK" in self.spell_book.spells:
+             ctk.CTkButton(self.spells_frame, text="RSK (Force Glory)", fg_color="#E74C3C", command=lambda: self._handle_cast_click("RSK", force_glory_override=True)).pack(pady=4, padx=5, fill="x")
+        if "BOK" in self.spell_book.spells:
+             ctk.CTkButton(self.spells_frame, text="BOK (Force Reset)", fg_color="#2E86C1", command=lambda: self._handle_cast_click("BOK", force_reset_override=True)).pack(pady=4, padx=5, fill="x")
+        ctk.CTkButton(self.spells_frame, text="Wait (0.5s)", fg_color="gray", command=lambda: self._advance_simulation(0.5)).pack(pady=20, padx=5, fill="x")
 
-            # For mapping back
-            # Note: The DraggableBlock uses the TAG, so 'item_id' passed to _on_drag_end will be the tag or the object ID?
-            # It passes the tag or id depending on how we set it. DraggableBlock init takes `item_id`.
-            # We are passing the tag.
-            self.block_map[tag] = item
+    def _handle_cast_click(self, key, force_glory_override=False, force_reset_override=False):
+        spell = self.spell_book.spells[key]
+        if not spell.is_usable(self.player, self.spell_book.spells):
+            self._show_rejection_popup(key)
+            return
 
-            # Info text below (Time, DMG)
-            if 'sim_result' in item and 'error' not in item:
-                res = item['sim_result']
-                self.canvas.create_text(x + self.block_width/2, self.lane_y + self.block_height + 15, text=f"{int(res['damage']/1000)}k", fill="#A9DFBF", font=("Arial", 9))
-                self.canvas.create_text(x + self.block_width/2, self.lane_y - 15, text=f"{res['timestamp']:.1f}s", fill="#BDC3C7", font=("Arial", 9))
+        # Task 4: Fix forced trigger logic
+        force_glory = self.force_proc_glory.get() or force_glory_override
+        force_reset = self.force_proc_reset.get() or force_reset_override
+        cast_time = spell.get_effective_cast_time(self.player)
 
-            x += self.block_width + self.block_gap
+        # Cast with explicit params
+        dmg, breakdown = spell.cast(self.player, other_spells=self.spell_book.spells,
+                                    force_proc_glory=force_glory, force_proc_reset=force_reset,
+                                    use_expected_value=True)
 
-        self.canvas.configure(scrollregion=(0, 0, x + 100, 400))
+        step_duration = max(self.player.gcd_remaining, cast_time)
+        visual_duration = max(step_duration, 0.15)
+        action_start_time = self.time_elapsed
+
+        color = "#1ABC9C"
+        if key == "RSK": color = "#E74C3C"
+        elif key == "FOF": color = "#8E44AD"
+        elif key == "TP": color = "#27AE60"
+        elif key == "ToD": color = "#5B2C6F"
+
+        self._record_and_draw(self.active_lane_y, action_start_time, visual_duration, key, color, {"Damage": dmg, "Breakdown": breakdown})
+        if 'extra_events' in breakdown:
+            for extra in breakdown['extra_events']:
+                 self._record_and_draw(self.derivative_lane_y, action_start_time, 0.15, extra['name'][:4], "#D4AC0D", {"Damage": extra.get('damage', 0), "Breakdown": extra})
+        self._advance_simulation(step_duration)
+
+    def _advance_simulation(self, duration):
+        base_time = self.time_elapsed
+        dmg, events = self.player.advance_time(duration, use_expected_value=True)
+        self.spell_book.tick(duration)
+        self.time_elapsed += duration
+        for event in events:
+            evt_time = base_time + event.get('offset', 0.0)
+            name = event.get('Action')
+            dmg_val = event.get('Expected DMG')
+            if event.get('source') == 'passive':
+                lane = self.passive_lane_y + (0 if "Auto" in name else 25)
+                self._record_and_draw(lane, evt_time, 0.1, name[0:2], "#95A5A6", {"Damage": dmg_val, "Breakdown": event.get('Breakdown')})
+            elif event.get('source') == 'active':
+                self._record_and_draw(self.active_lane_y + 40, evt_time, 0.1, "Tick", "#D35400", {"Damage": dmg_val, "Breakdown": event.get('Breakdown')})
+        self._update_status()
+
+    def _record_and_draw(self, lane_y, start_time, duration, text, color, info):
+        self.event_history.append({'lane_y': lane_y, 'start_time': start_time, 'duration': duration, 'text': text, 'color': color, 'info': info})
+        self._draw_block(lane_y, start_time, duration, text, color, info)
+
+    def _draw_block(self, lane_y, start_time, duration, text, color, info):
+        x1 = start_time * self.pixels_per_second
+        x2 = (start_time + duration) * self.pixels_per_second
+        y1 = lane_y
+        y2 = lane_y + 30
+        tag = f"block_{int(start_time*100)}_{random.randint(0,1000000)}"
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="black", tags=tag)
+        self.canvas.create_text((x1+x2)/2, (y1+y2)/2, text=text, fill="white", font=("Arial", 9, "bold"), tags=tag)
+        self.canvas.tag_bind(tag, "<Button-1>", lambda e, i=info, n=text: self._show_tooltip(e, n, i))
+
+    def _show_rejection_popup(self, spell_key):
+        top = ctk.CTkToplevel(self)
+        top.title("Rejection")
+        top.geometry("300x150")
+        ctk.CTkLabel(top, text=f"Cannot Cast {spell_key}", font=("Arial", 16, "bold"), text_color="#C0392B").pack(pady=20)
+        ctk.CTkLabel(top, text="Cooldown not ready or insufficient resources.", font=("Arial", 12)).pack(pady=5)
+        ctk.CTkButton(top, text="OK", command=top.destroy).pack(pady=10)
+
+    def _show_tooltip(self, event, name, info):
+        top = ctk.CTkToplevel(self)
+        top.title(f"Details: {name}")
+        top.geometry("600x600") # Larger tooltip
+
+        dmg_val = int(info['Damage'])
+        ctk.CTkLabel(top, text=f"Action: {name}", font=("Arial", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(top, text=f"Damage: {dmg_val}", font=("Arial", 14, "bold"), text_color="#E67E22").pack(pady=5)
+
+        breakdown = info.get('Breakdown')
+        text_info = ""
+
+        if isinstance(breakdown, dict):
+            # Formatted per Task 2
+            if 'raw_base' in breakdown: text_info += f"Raw Base: {breakdown['raw_base']:.1f}\n"
+            if 'components' in breakdown: text_info += f"Formula: {breakdown['components']}\n\n"
+
+            text_info += "Modifiers:\n"
+            mods = breakdown.get('modifiers', [])
+            if isinstance(mods, list):
+                for m in mods: text_info += f"  - {m}\n"
+
+            crit_src = breakdown.get('crit_sources', [])
+            if crit_src:
+                text_info += "\nCrit Sources:\n"
+                for c in crit_src: text_info += f"  - {c}\n"
+
+            text_info += f"\nFinal Crit: {breakdown.get('final_crit', 0)*100:.1f}%\n"
+            text_info += f"Crit Mult: {breakdown.get('crit_mult', 2.0):.2f}x\n"
+
+            if 'expected_dmg' in breakdown:
+                 text_info += f"\nExpected DMG: {breakdown['expected_dmg']:.1f}\n"
+            if 'snapshot_dmg' in breakdown:
+                 text_info += f"Snapshot DMG: {breakdown['snapshot_dmg']:.1f}\n"
+
+            if 'extra_events' in breakdown:
+                text_info += "\nExtra Events:\n"
+                for extra in breakdown['extra_events']:
+                    text_info += f"  - {extra['name']}: {int(extra.get('damage',0))}\n"
+        else:
+            text_info = str(breakdown)
+
+        textbox = ctk.CTkTextbox(top, width=580, height=450)
+        textbox.pack(pady=10)
+        textbox.insert("1.0", text_info)
+        textbox.configure(state="disabled")
+
+    def _start_selection(self, event):
+        self.selection_start_x = self.canvas.canvasx(event.x)
+        if self.selection_rect: self.canvas.delete(self.selection_rect)
+        self.selection_rect = self.canvas.create_rectangle(self.selection_start_x, 0, self.selection_start_x, self.timeline_height, fill="white", stipple="gray25", outline="")
+
+    def _update_selection(self, event):
+        cur_x = self.canvas.canvasx(event.x)
+        self.canvas.coords(self.selection_rect, self.selection_start_x, 0, cur_x, self.timeline_height)
+
+    def _end_selection(self, event):
+        end_x = self.canvas.canvasx(event.x)
+        start_time = min(self.selection_start_x, end_x) / self.pixels_per_second
+        end_time = max(self.selection_start_x, end_x) / self.pixels_per_second
+        if end_time - start_time < 0.1:
+             self.canvas.delete(self.selection_rect)
+             self.selection_rect = None
+             return
+        self._calculate_selection_stats(start_time, end_time)
+        self.canvas.delete(self.selection_rect)
+        self.selection_rect = None
+
+    def _calculate_selection_stats(self, start, end):
+        total_dmg = 0
+        breakdown = {}
+        for evt in self.event_history:
+            t = evt['start_time']
+            if start <= t <= end:
+                 d = evt['info'].get('Damage', 0)
+                 total_dmg += d
+                 name = evt['text']
+                 breakdown[name] = breakdown.get(name, 0) + d
+        duration = end - start
+        dps = total_dmg / duration if duration > 0 else 0
+        self._show_selection_popup(total_dmg, dps, duration, breakdown)
+
+    def _show_selection_popup(self, total_dmg, dps, duration, breakdown):
+        top = ctk.CTkToplevel(self)
+        top.title("Selection Analysis")
+        top.geometry("400x500")
+        ctk.CTkLabel(top, text="Selection Stats", font=("Arial", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(top, text=f"Time: {duration:.2f}s", font=("Arial", 12)).pack()
+        ctk.CTkLabel(top, text=f"Total EV Damage: {int(total_dmg)}", font=("Arial", 14, "bold"), text_color="#E67E22").pack(pady=5)
+        ctk.CTkLabel(top, text=f"DPS: {int(dps)}", font=("Arial", 14, "bold"), text_color="#27AE60").pack(pady=5)
+        ctk.CTkLabel(top, text="Breakdown:", font=("Arial", 12, "bold")).pack(pady=5)
+        sorted_bd = sorted(breakdown.items(), key=lambda x: x[1], reverse=True)
+        text_info = ""
+        for name, dmg in sorted_bd:
+            pct = (dmg / total_dmg * 100) if total_dmg > 0 else 0
+            text_info += f"{name}: {int(dmg)} ({pct:.1f}%)\n"
+        textbox = ctk.CTkTextbox(top, width=380, height=300)
+        textbox.pack(pady=10)
+        textbox.insert("1.0", text_info)
+        textbox.configure(state="disabled")
