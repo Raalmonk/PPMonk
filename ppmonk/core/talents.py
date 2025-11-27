@@ -365,7 +365,7 @@ class StandReadyTalent(Talent):
 class AgainstAllOddsTalent(Talent):
     def apply(self, player, spell_book):
         player.agility *= 1.04
-        player.attack_power = player.agility # Update AP immediately
+        # AP remains 1.0
 
 class EfficientTrainingTalent(Talent):
     def apply(self, player, spell_book):
