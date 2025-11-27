@@ -1,0 +1,5 @@
+>>> 初始化 PPMonk (UI 模式)...
+  天赋: ['WDP', 'SW', 'Ascension', 'Zenith']
+  属性: {'rating_haste': 1500.0, 'rating_crit': 2000.0, 'rating_mastery': 1000.0, 'rating_vers': 500.0}
+CUDA Available: False
+WARNING: Running on CPU! This will be slow.

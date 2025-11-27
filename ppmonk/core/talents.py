@@ -331,7 +331,6 @@ class ShadoPanBaseTalent(Talent):
     def apply(self, player, spell_book):
         player.has_shado_pan_base = True
         player.flurry_charges = 0
-        # Stacking logic is in Player.advance_time
 
 class PrideOfPandariaTalent(Talent):
     def apply(self, player, spell_book):
@@ -344,7 +343,6 @@ class HighImpactTalent(Talent):
 class VeteransEyeTalent(Talent):
     def apply(self, player, spell_book):
         player.has_veterans_eye = True
-        # Logic in Player.update_stats
 
 class MartialPrecisionTalent(Talent):
     def apply(self, player, spell_book):
@@ -384,11 +382,68 @@ class VigilantWatchTalent(Talent):
 class WeaponsOfTheWallTalent(Talent):
     def apply(self, player, spell_book):
         player.has_weapons_of_the_wall = True
-        # Logic applied in SpellBook (Zenith damage)
 
 class WisdomOfTheWallTalent(Talent):
     def apply(self, player, spell_book):
         player.has_wisdom_of_the_wall = True
+
+
+# --- Conduit of the Celestials (COTC) Hero Talents ---
+
+class CelestialConduitTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_celestial_conduit = True
+        if 'Conduit' in spell_book.spells:
+            spell_book.spells['Conduit'].is_known = True
+
+class COTCBaseTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_cotc_base = True
+        # Unlock Xuen features
+
+class XuensBondTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_xuens_bond = True
+
+class HeartOfJadeSerpentTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_heart_of_jade_serpent = True
+
+class StrengthOfBlackOxTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_strength_of_black_ox = True
+
+class InnerCompassTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_inner_compass = True
+
+class CourageOfWhiteTigerTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_courage_of_white_tiger = True
+
+class XuensGuidanceTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_xuens_guidance = True
+
+class TempleTrainingTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_temple_training = True
+        if 'FOF' in spell_book.spells:
+            spell_book.spells['FOF'].add_modifier(self.name, 1.10)
+        if 'SCK' in spell_book.spells:
+            spell_book.spells['SCK'].add_modifier(self.name, 1.10)
+
+class RestoreBalanceTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_restore_balance = True
+
+class PathOfFallingStarTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_path_of_falling_star = True
+
+class UnityWithinTalent(Talent):
+    def apply(self, player, spell_book):
+        player.has_unity_within = True
 
 # --- 完整数据库 ---
 TALENT_DB = {
@@ -481,6 +536,20 @@ TALENT_DB = {
     'VigilantWatch': VigilantWatchTalent('Vigilant Watch'),
     'WeaponsOfTheWall': WeaponsOfTheWallTalent('Weapons of the Wall'),
     'WisdomOfTheWall': WisdomOfTheWallTalent('Wisdom of the Wall'),
+
+    # Conduit of the Celestials (COTC Hero Talents)
+    'COTCBase': COTCBaseTalent('Conduit of the Celestials (Base)'),
+    'CelestialConduit': CelestialConduitTalent('Celestial Conduit'),
+    'XuensBond': XuensBondTalent('Xuen\'s Bond'),
+    'HeartOfJadeSerpent': HeartOfJadeSerpentTalent('Heart of the Jade Serpent'),
+    'StrengthOfBlackOx': StrengthOfBlackOxTalent('Strength of the Black Ox'),
+    'InnerCompass': InnerCompassTalent('Inner Compass'),
+    'CourageOfWhiteTiger': CourageOfWhiteTigerTalent('Courage of the White Tiger'),
+    'XuensGuidance': XuensGuidanceTalent('Xuen\'s Guidance'),
+    'TempleTraining': TempleTrainingTalent('Temple Training'),
+    'RestoreBalance': RestoreBalanceTalent('Restore Balance'),
+    'PathOfFallingStar': PathOfFallingStarTalent('Path of the Falling Star'),
+    'UnityWithin': UnityWithinTalent('Unity Within'),
 
     # Shortcuts
     'WDP': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),
