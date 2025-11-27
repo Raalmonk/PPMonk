@@ -2,15 +2,16 @@ import random
 
 
 class PlayerState:
-    def __init__(self, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw'):
+    def __init__(self, agility=2000.0, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw'):
         self.rating_crit = rating_crit
         self.rating_haste = rating_haste
         self.rating_mastery = rating_mastery
         self.rating_vers = rating_vers
+        self.agility = agility
 
         # [新] 武器与攻击强度
         self.weapon_type = weapon_type  # '2h' or 'dw'
-        self.attack_power = 2000.0  # 基础 AP，可根据装备调整
+        self.attack_power = agility  # 基础 AP = 敏捷
 
         self.base_mastery = 0.19
         self.base_crit = 0.10
@@ -113,29 +114,40 @@ class PlayerState:
             if self.swing_timer <= 0:
                 self.swing_timer += self.base_swing_time / (1.0 + self.haste)
                 is_dual_threat = self.has_dual_threat and random.random() < 0.30
-                damage = 0.0
+
+                # Base Damage Calculation
+                coeff = 1.0
                 if is_dual_threat:
-                    damage = 3.726 * self.attack_power
+                    coeff = 3.726
                 elif self.weapon_type == '2h':
-                    damage = 2.40 * self.attack_power
+                    coeff = 2.40
                 else:
-                    damage = 1.80 * self.attack_power
+                    coeff = 1.80
+
+                base_dmg = coeff * self.attack_power
+
                 crit_chance = self.crit
                 crit_mult = 2.0
                 dmg_mod = 1.0 + self.versatility
-                expected_dmg = (damage * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
+
+                expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
                 total_damage += expected_dmg
+
                 key = "Dual Threat" if is_dual_threat else "Auto Attack"
                 if damage_meter is not None:
                     damage_meter[key] = damage_meter.get(key, 0) + expected_dmg
+
+                breakdown = f"(Base: {int(base_dmg)}, Vers: {self.versatility*100:.1f}%, Crit: {crit_chance*100:.1f}%)"
                 log_entries.append({
                     "Action": key,
-                    "Base": damage,
+                    "Base": base_dmg,
                     "Dmg Mod": dmg_mod,
                     "Crit%": crit_chance,
                     "Crit Mult": crit_mult,
-                    "Expected DMG": expected_dmg
+                    "Expected DMG": expected_dmg,
+                    "Breakdown": breakdown
                 })
+
             if self.is_channeling:
                 self.channel_time_remaining -= step
                 self.time_until_next_tick -= step
@@ -143,12 +155,20 @@ class PlayerState:
                     if self.channel_ticks_remaining > 0:
                         spell = self.current_channel_spell
                         tick_idx = spell.total_ticks - self.channel_ticks_remaining
-                        tick_dmg, _ = spell.calculate_tick_damage(self, tick_idx=tick_idx)
+                        tick_dmg, breakdown = spell.calculate_tick_damage(self, tick_idx=tick_idx)
                         total_damage += tick_dmg
                         if damage_meter is not None and spell:
                             damage_meter[spell.abbr] = damage_meter.get(spell.abbr, 0) + tick_dmg
                         self.channel_ticks_remaining -= 1
                         self.time_until_next_tick += self.channel_tick_interval
+
+                        # Log tick
+                        log_entries.append({
+                            "Action": f"{spell.abbr} (Tick)",
+                            "Expected DMG": tick_dmg,
+                            "Breakdown": breakdown
+                        })
+
                 if self.channel_time_remaining <= 1e-6 or self.channel_ticks_remaining <= 0:
                     self.is_channeling = False
                     self.current_channel_spell = None

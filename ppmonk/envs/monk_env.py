@@ -110,7 +110,7 @@ class MonkEnv(gym.Env):
     def step(self, action_idx):
         total_damage = 0
         time_to_wait = 0.0
-        log_details = {}
+        log_details = ""
         auto_attack_logs = []
         if self.player.gcd_remaining > 0:
             time_to_wait = max(time_to_wait, self.player.gcd_remaining)
@@ -130,7 +130,7 @@ class MonkEnv(gym.Env):
             key = self.action_map[action_idx]
             spell = self.book.spells[key]
             if spell.current_cd > 0.01:
-                return self._get_obs(), -10.0, False, False, {'damage': 0, 'log_details': {}, 'auto_attack_logs': []}
+                return self._get_obs(), -10.0, False, False, {'damage': 0, 'log_details': "", 'auto_attack_logs': []}
             dmg, log_details = spell.cast(self.player, other_spells=self.book.spells, damage_meter=self.damage_meter)
             _, current_mod, _ = self.timeline.get_status(self.time)
             scaled_dmg = dmg * current_mod
