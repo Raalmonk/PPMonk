@@ -61,7 +61,7 @@ class Spell:
         if player.chi < cost: return False
         return True
 
-    def cast(self, player, other_spells=None, damage_meter=None):
+    def cast(self, player, other_spells=None, damage_meter=None, force_proc_glory=False, force_proc_reset=False):
         player.energy -= self.energy_cost
         actual_chi_cost = self.chi_cost
         if player.zenith_active and self.chi_cost > 0:
@@ -106,12 +106,25 @@ class Spell:
 
                 player.totm_stacks = 0
 
-            if random.random() < 0.12 and other_spells and 'RSK' in other_spells:
+            # Force Reset Logic
+            should_reset = False
+            if force_proc_reset:
+                should_reset = True
+            elif random.random() < 0.12:
+                should_reset = True
+
+            if should_reset and other_spells and 'RSK' in other_spells:
                 other_spells['RSK'].current_cd = 0.0
 
         # 3. Glory of the Dawn
         if self.abbr == 'RSK' and player.has_glory_of_the_dawn:
-            if random.random() < player.haste:
+            should_proc_glory = False
+            if force_proc_glory:
+                should_proc_glory = True
+            elif random.random() < player.haste:
+                should_proc_glory = True
+
+            if should_proc_glory:
                 glory_dmg = 1.0 * player.attack_power
                 is_crit = random.random() < (player.crit + self.bonus_crit_chance)
                 crit_m = (2.0 + self.crit_damage_bonus) if is_crit else 1.0
@@ -120,6 +133,7 @@ class Spell:
                 player.chi = min(player.max_chi, player.chi + 1)
                 if damage_meter is not None:
                     damage_meter['Glory of Dawn'] = damage_meter.get('Glory of Dawn', 0) + final_glory
+
         if self.abbr == 'Zenith':
             player.zenith_active = True
             player.zenith_duration = 15.0
@@ -155,13 +169,17 @@ class Spell:
             player.channel_tick_interval = self.get_tick_interval(player)
             player.time_until_next_tick = player.channel_tick_interval
             player.channel_mastery_snapshot = triggers_mastery
-            return 0.0, []
+            # Return empty string or "Channeling..." for breakdown
+            return 0.0, "(Channeling)"
         else:
-            base_dmg, log_details = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
+            base_dmg, breakdown = self.calculate_tick_damage(player, mastery_override=triggers_mastery)
             total_damage = base_dmg + extra_damage
-            if isinstance(log_details, dict):
-                log_details['Expected DMG'] = total_damage
-            return total_damage, log_details
+
+            # If extra damage happened, append to breakdown
+            if extra_damage > 0:
+                breakdown += f" + Extra: {int(extra_damage)}"
+
+            return total_damage, breakdown
 
     def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
         base_dmg = self.tick_coeff * player.attack_power
@@ -182,17 +200,14 @@ class Spell:
         if apply_mastery:
             dmg_mod *= (1.0 + player.mastery)
         dmg_mod *= (1.0 + player.versatility)
+
         crit_chance = min(1.0, player.crit + self.bonus_crit_chance)
         crit_mult = 2.0 + self.crit_damage_bonus
         expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
-        log_details = {
-            "Base": base_dmg,
-            "Dmg Mod": dmg_mod,
-            "Crit%": crit_chance,
-            "Crit Mult": crit_mult,
-            "Expected DMG": expected_dmg
-        }
-        return expected_dmg, log_details
+
+        breakdown_string = f"(Base: {int(base_dmg)}, Mod: {dmg_mod:.2f}, Crit: {crit_chance*100:.1f}%)"
+
+        return expected_dmg, breakdown_string
 
     def tick_cd(self, dt):
         if self.charges < self.max_charges:

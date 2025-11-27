@@ -6,6 +6,7 @@ import customtkinter as ctk
 from main import SCENARIO_MAP, run_simulation
 from ppmonk.ui.timeline_view import NativeTimelineWindow
 from ppmonk.ui.talent_ui import TalentTreeWindow
+from ppmonk.ui.sandbox_ui import SandboxWindow
 
 
 ctk.set_appearance_mode("Dark")
@@ -164,7 +165,16 @@ class PPMonkApp(ctk.CTk):
             state="disabled",
             command=self._open_timeline,
         )
-        self.timeline_btn.grid(row=13, column=0, padx=20, pady=(0, 20), sticky="ew")
+        self.timeline_btn.grid(row=13, column=0, padx=20, pady=(0, 10), sticky="ew")
+
+        self.sandbox_btn = ctk.CTkButton(
+            sidebar,
+            text="Manual Sandbox",
+            fg_color="#D35400",
+            hover_color="#A04000",
+            command=self._open_sandbox,
+        )
+        self.sandbox_btn.grid(row=14, column=0, padx=20, pady=(0, 20), sticky="ew")
 
         main = ctk.CTkFrame(self)
         main.grid(row=0, column=1, sticky="nsew")
@@ -209,6 +219,10 @@ class PPMonkApp(ctk.CTk):
                 assets_path="PPMonk/assets/abilityIcons",
             )
             timeline_window.focus()
+
+    def _open_sandbox(self):
+        sandbox = SandboxWindow(self)
+        sandbox.focus()
 
     def _on_talents_updated(self, talent_list):
         self.active_talents_list = talent_list
