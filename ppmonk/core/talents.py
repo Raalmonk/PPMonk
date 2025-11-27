@@ -293,6 +293,73 @@ class JadefireStompTalent(Talent):
         player.has_jadefire_stomp = True
 
 
+# --- Task 3: Row 10 & TEB ---
+
+class TigereyeBrewTalent(Talent):
+    """8-1 / 9-1: Tiger Eye Brew Stacking"""
+    def apply(self, player, spell_book):
+        player.has_teb_stacking = True
+
+class TigereyeBrewDamageTalent(Talent):
+    """9-1 Layer 2: TEB Crit Damage"""
+    def __init__(self, name, rank=2):
+        super().__init__(name)
+        self.rank = rank
+    def apply(self, player, spell_book):
+        player.teb_crit_dmg_bonus += 0.10 * self.rank
+
+class SkyfireHeelTalent(Talent):
+    """10-2: Skyfire Heel"""
+    def apply(self, player, spell_book):
+        player.has_skyfire_heel = True
+
+class HarmonicComboTalent(Talent):
+    """10-3: Harmonic Combo"""
+    def apply(self, player, spell_book):
+        if 'FOF' in spell_book.spells:
+            fof = spell_book.spells['FOF']
+            # Dmg -10%
+            fof.add_modifier(self.name, 0.90)
+            # Chi Cost = 2
+            fof.chi_cost = 2
+
+class FlurryOfXuenTalent(Talent):
+    """10-4: Flurry of Xuen"""
+    def apply(self, player, spell_book):
+        player.has_flurry_of_xuen = True
+
+class MartialAgilityTalent(Talent):
+    """10-5: Martial Agility"""
+    def apply(self, player, spell_book):
+        player.has_martial_agility = True
+
+class AirborneRhythmTalent(Talent):
+    """10-6: Airborne Rhythm"""
+    def apply(self, player, spell_book):
+        if 'SW' in spell_book.spells:
+            sw = spell_book.spells['SW']
+            sw.chi_gen = 2
+
+class HurricanesVaultTalent(Talent):
+    """10-6_b: Hurricane's Vault"""
+    def apply(self, player, spell_book):
+        if 'SW' in spell_book.spells:
+            sw = spell_book.spells['SW']
+            sw.chi_cost = 2
+            sw.chi_gen = 0
+            sw.add_modifier(self.name, 2.0)
+
+class PathOfJadeTalent(Talent):
+    """10-7: Path of Jade"""
+    def apply(self, player, spell_book):
+        player.has_path_of_jade = True
+
+class SingularlyFocusedJadeTalent(Talent):
+    """10-7_b: Singularly Focused Jade"""
+    def apply(self, player, spell_book):
+        player.has_singularly_focused_jade = True
+
+
 # --- 完整数据库 ---
 TALENT_DB = {
     # Row 1
@@ -340,7 +407,7 @@ TALENT_DB = {
     '7-5': InnerPeaceTalent('Inner Peace'),
 
     # Row 8
-    '8-1': PlaceholderTalent('Tiger Eye Brew'),
+    '8-1': TigereyeBrewTalent('Tiger Eye Brew'),
     '8-2': SequencedStrikesTalent('Sequenced Strikes'),
     '8-3': SunfireSpiralTalent('Sunfire Spiral'),
     '8-4': CommunionWithWindTalent('Communion with Wind'),
@@ -350,7 +417,7 @@ TALENT_DB = {
     '8-7': MemoryOfMonasteryTalent('Memory of Monastery'),
 
     # Row 9
-    '9-1': PlaceholderTalent('TEB Buff'),
+    '9-1': TigereyeBrewDamageTalent('TEB Damage'),
     '9-2': RushingWindKickTalent('Rushing Wind Kick'),
     '9-3': XuensBattlegearTalent('Xuens Battlegear'),
     '9-4': ThunderfistTalent('Thunderfist'),
@@ -360,13 +427,22 @@ TALENT_DB = {
     '9-8': JadefireStompTalent('Jadefire Stomp'),
 
     # Row 10
-    '10-1': PlaceholderTalent('TEB Final'),
-    '10-2': PlaceholderTalent('Skyfire Heel'),
-    '10-3': PlaceholderTalent('Harmonic Combo'),
-    '10-4': PlaceholderTalent('Flurry of Xuen'),
-    '10-5': PlaceholderTalent('Martial Agility'),
-    '10-6': PlaceholderTalent('Airborne Rhythm'),
-    '10-7': PlaceholderTalent('Path of Jade'),
+    '10-1': PlaceholderTalent('TEB Final'), # Merged into 8-1/9-1? TEB is a system. Prompt implies full system.
+    # The prompt listed "Tiger Eye Brew (TEB) 机制" under Task 2, and "TigereyeBrewTalent" under Task 3.
+    # I have implemented TigereyeBrewTalent (8-1) and TigereyeBrewDamageTalent (9-1).
+    # 10-1 is likely just the final node that might grant more bonuses or just existence?
+    # Usually the system is unlocked early. I'll leave 10-1 as placeholder unless user specified.
+    # The user prompt for Task 3: "TigereyeBrewTalent: 开启 Player 的叠层逻辑. TigereyeBrewDamageTalent (第二层): 增加 player.teb_crit_dmg_bonus".
+    # It didn't mention 10-1 specifically differently.
+
+    '10-2': SkyfireHeelTalent('Skyfire Heel'),
+    '10-3': HarmonicComboTalent('Harmonic Combo'),
+    '10-4': FlurryOfXuenTalent('Flurry of Xuen'),
+    '10-5': MartialAgilityTalent('Martial Agility'),
+    '10-6': AirborneRhythmTalent('Airborne Rhythm'),
+    '10-6_b': HurricanesVaultTalent('Hurricane\'s Vault'),
+    '10-7': PathOfJadeTalent('Path of Jade'),
+    '10-7_b': SingularlyFocusedJadeTalent('Singularly Focused Jade'),
 
     # Shortcuts
     'WDP': UnlockSpellTalent('Whirling Dragon Punch', 'WDP'),

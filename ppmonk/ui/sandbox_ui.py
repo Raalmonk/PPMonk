@@ -179,8 +179,9 @@ class SandboxWindow(ctk.CTkToplevel):
             "6-1", "6-2", "6-2_b",
             "WDP", "SW", "SOTWL",
             # Enable new stuff for testing
-            "8-5", "8-5_b", "8-6", "8-7",
-            "9-2", "9-3", "9-4", "9-5", "9-8"
+            "8-1", "8-2", "8-3", "8-4", "8-5", "8-5_b", "8-6", "8-7",
+            "9-1", "9-2", "9-3", "9-4", "9-5", "9-8",
+            "10-2", "10-3", "10-4", "10-5", "10-6", "10-7"
         ]
 
         self.spell_book = SpellBook(talents=talents_to_use)
@@ -228,6 +229,8 @@ class SandboxWindow(ctk.CTkToplevel):
             buffs.append(f"TotM({self.player.totm_stacks})")
         if self.player.rwk_ready:
             buffs.append(f"RWK Ready")
+        if self.player.teb_stacks > 0:
+            buffs.append(f"TEB({self.player.teb_stacks})")
 
         self.status_label_buffs.configure(text=" | ".join(buffs))
         self._update_button_visuals_only()

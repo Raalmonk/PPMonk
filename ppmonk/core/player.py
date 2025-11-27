@@ -75,6 +75,19 @@ class PlayerState:
         self.has_weapon_of_wind = False
         self.has_jadefire_stomp = False
 
+        # [Task 1] TEB & Martial Agility
+        self.teb_stacks = 10
+        self.teb_timer = 8.0
+        self.teb_active_bonus = 0.0
+        self.teb_crit_dmg_bonus = 0.0
+        self.has_teb_stacking = False
+        self.has_martial_agility = False
+
+        # [Task 2] New Talent Flags
+        self.has_path_of_jade = False
+        self.has_singularly_focused_jade = False
+        self.has_flurry_of_xuen = False
+
         # [Task 2] Core Buffs
         self.totm_stacks = 0
         self.max_totm_stacks = 4 # Default 4
@@ -134,6 +147,13 @@ class PlayerState:
 
             self.energy = min(self.max_energy, self.energy + regen_rate * step)
 
+            # [Task 1] TEB Stacking
+            if self.has_teb_stacking:
+                self.teb_timer -= step
+                if self.teb_timer <= 0:
+                    self.teb_stacks = min(20, self.teb_stacks + 1)
+                    self.teb_timer += 8.0
+
             # ICD Timers
             if self.thunderfist_icd_timer > 0:
                 self.thunderfist_icd_timer -= step
@@ -171,6 +191,13 @@ class PlayerState:
                 swing_speed_mod = 1.0 + self.haste
                 if self.momentum_buff_active:
                     swing_speed_mod *= 1.6
+
+                # [Task 1] Martial Agility
+                if self.has_martial_agility:
+                    ma_mod = 1.3
+                    if self.zenith_active:
+                        ma_mod = 1.6
+                    swing_speed_mod *= ma_mod
 
                 self.swing_timer += self.base_swing_time / swing_speed_mod
 
@@ -315,18 +342,23 @@ class PlayerState:
                             if getattr(self, 'has_universal_energy', False):
                                 jf_mod *= 1.15 # Nature
 
-                            # Soft Cap
-                            # To avoid duplicating logic, I'll implement soft cap inline here or use a helper if available.
-                            # Since this is inside PlayerState, I don't have easy access to Spell methods unless I pass 'spell' which I have.
-                            # But Spell._apply_aoe_scaling is internal. I should have made it static or public.
-                            # I'll replicate simple soft cap here:
-                            # dmg = base * sqrt(5/count) if count > 5
-                            count = self.target_count
-                            scale = 1.0
-                            if count > 5:
-                                scale = (5.0 / count) ** 0.5
+                            # [Task 2] Path of Jade / Singularly Focused Jade
+                            eff_target_count = self.target_count
+                            poj_bonus = 0.0
+                            if getattr(self, 'has_path_of_jade', False):
+                                poj_bonus = min(0.50, 0.10 * eff_target_count)
+                                jf_mod *= (1.0 + poj_bonus)
 
-                            jf_total = jf_base * jf_mod * count * scale * (1 + (self.crit * (crit_mult - 1)))
+                            if getattr(self, 'has_singularly_focused_jade', False):
+                                jf_mod *= 4.0 # Base + 300%
+                                eff_target_count = 1
+
+                            # Soft Cap (Manual Imp)
+                            scale = 1.0
+                            if eff_target_count > 5:
+                                scale = (5.0 / eff_target_count) ** 0.5
+
+                            jf_total = jf_base * jf_mod * eff_target_count * scale * (1 + (self.crit * (crit_mult - 1)))
 
                             total_damage += jf_total
                             if damage_meter is not None:
@@ -337,8 +369,8 @@ class PlayerState:
                                 "Expected DMG": jf_total,
                                 "Breakdown": {
                                     "base": int(jf_base),
-                                    "targets": count,
-                                    "modifiers": ["SoftCap" if count>5 else "Uncapped"]
+                                    "targets": eff_target_count,
+                                    "modifiers": ["SoftCap" if eff_target_count>5 else "Uncapped", f"PathJade:{poj_bonus:.2f}"],
                                 },
                                 "source": "passive",
                                 "offset": elapsed

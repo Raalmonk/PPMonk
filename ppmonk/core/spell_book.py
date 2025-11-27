@@ -105,11 +105,9 @@ class Spell:
                 player.chi = min(player.max_chi, player.chi + 1)
 
             # [Task 3: RWK Trigger]
-            # "When consuming BOK! Buff, 40% chance to trigger RWK"
             if getattr(player, 'has_rushing_wind_kick', False):
                 if random.random() < 0.40:
                     player.rwk_ready = True
-                    # print("RWK Ready!")
 
         is_dance_of_chiji = False
         if self.abbr == 'SCK' and player.dance_of_chiji_stacks > 0:
@@ -118,7 +116,6 @@ class Spell:
             is_dance_of_chiji = True
 
             # [Task 3: Sequenced Strikes]
-            # "Consume DoCJ -> Give 1 BOK!"
             if getattr(player, 'has_sequenced_strikes', False):
                 player.combo_breaker_stacks = min(2, player.combo_breaker_stacks + 1)
 
@@ -133,7 +130,7 @@ class Spell:
         player.chi = max(0, player.chi - actual_chi_cost)
         player.chi = min(player.max_chi, player.chi + self.chi_gen + obsidian_bonus)
 
-        # [Task 3: Memory of the Monastery - TP proc BOK 10% (up from 8%)]
+        # [Task 3: Memory of the Monastery]
         tp_proc_chance = 0.08
         if getattr(player, 'has_memory_of_monastery', False):
             tp_proc_chance = 0.10
@@ -183,7 +180,6 @@ class Spell:
                 player.totm_stacks = min(player.max_totm_stacks, player.totm_stacks + 4)
 
             # [Task 3: Thunderfist Stack Gen]
-            # "stacks += 4 + target_count"
             if getattr(player, 'has_thunderfist', False):
                  player.thunderfist_stacks += (4 + player.target_count)
 
@@ -218,7 +214,7 @@ class Spell:
             if player.zenith_active and getattr(player, 'has_weapon_of_wind', False):
                 ji_mods *= 1.10
 
-            is_crit_ji = random.random() < player.crit
+            is_crit_ji = random.random() < (player.crit + (player.teb_active_bonus if player.zenith_active else 0.0))
             if is_crit_ji:
                 ji_base *= 2.0
 
@@ -245,8 +241,8 @@ class Spell:
                 if getattr(player, 'has_hit_combo', False):
                     hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
 
-                is_crit = random.random() < (player.crit + self.bonus_crit_chance) # Approx
-                crit_m = (2.0 + self.crit_damage_bonus) if is_crit else 1.0
+                is_crit = random.random() < (player.crit + self.bonus_crit_chance + (player.teb_active_bonus if player.zenith_active else 0.0)) # Approx
+                crit_m = (2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus) if is_crit else 1.0
 
                 # Weapon Wind
                 ww_mod = 1.10 if (player.zenith_active and getattr(player, 'has_weapon_of_wind', False)) else 1.0
@@ -291,8 +287,8 @@ class Spell:
                 if getattr(player, 'has_hit_combo', False):
                     hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
 
-                is_crit = random.random() < (player.crit + self.bonus_crit_chance)
-                crit_m = (2.0 + self.crit_damage_bonus) if is_crit else 1.0
+                is_crit = random.random() < (player.crit + self.bonus_crit_chance + (player.teb_active_bonus if player.zenith_active else 0.0))
+                crit_m = (2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus) if is_crit else 1.0
                 ww_mod = 1.10 if (player.zenith_active and getattr(player, 'has_weapon_of_wind', False)) else 1.0
 
                 final_glory = glory_dmg * (1 + player.versatility) * crit_m * hc_mod * ww_mod
@@ -319,6 +315,14 @@ class Spell:
                 other_spells['RSK'].current_cd = 0
             player.chi = min(player.max_chi, player.chi + 2)
 
+            # [Task 2] TEB Consumption
+            # 消耗: 在 Zenith.cast 中，消耗所有 teb_stacks。
+            # Buff: 设置 player.teb_active_bonus = consumed_stacks * 0.02。
+            consumed_stacks = player.teb_stacks
+            player.teb_stacks = 0
+            player.teb_active_bonus = consumed_stacks * 0.02
+            # Note: teb_active_bonus applies to Crit Chance during Zenith active (handled in calculate_tick_damage)
+
             # Zenith Blast
             zenith_burst = 10.0 * player.attack_power * player.agility
             hc_mod = 1.0
@@ -334,7 +338,8 @@ class Spell:
             extra_damage_details.append({
                 'name': 'Zenith Blast',
                 'damage': zenith_final,
-                'crit': False
+                'crit': False,
+                'teb_consumed': consumed_stacks
             })
 
         if self.abbr == 'Xuen':
@@ -342,13 +347,49 @@ class Spell:
             player.xuen_duration = 24.0
             player.update_stats()
 
+        # [Task 2] Flurry of Xuen
+        if getattr(player, 'has_flurry_of_xuen', False):
+            should_proc_fox = False
+            is_guaranteed = (self.abbr == 'Xuen')
+            if is_guaranteed:
+                should_proc_fox = True
+            elif random.random() < 0.10: # Assumed 10% or PPM
+                should_proc_fox = True
+
+            if should_proc_fox:
+                # 3.92 * AP * Agility (Physical)
+                fox_base = 3.92 * player.attack_power * player.agility
+                fox_mod = 1.0 + player.versatility
+
+                # Check for guaranteed crit from Xuen cast
+                fox_crit_chance = player.crit
+                if is_guaranteed:
+                    fox_crit_chance = 1.0
+
+                # Apply AOE 5 targets decrement (use soft cap or custom?)
+                # Prompt: "AOE 5目标递减" -> standard Soft Cap logic usually.
+                fox_final = self._apply_aoe_scaling(fox_base * fox_mod, player, 'soft_cap')
+
+                crit_m = 2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus
+                fox_expected = fox_final * (1 + (fox_crit_chance * (crit_m - 1)))
+
+                extra_damage += fox_expected
+                extra_damage_details.append({
+                    'name': 'Flurry of Xuen',
+                    'damage': fox_expected,
+                    'crit': (fox_crit_chance >= 1.0)
+                })
+
+
         if self.triggers_combat_wisdom and getattr(player, 'combat_wisdom_ready', False):
             player.combat_wisdom_ready = False
             player.combat_wisdom_timer = 15.0
             eh_base = 1.2 * player.attack_power * player.agility
             eh_crit_chance = player.crit + 0.15
+            if player.zenith_active:
+                eh_crit_chance += player.teb_active_bonus
             is_crit_eh = random.random() < eh_crit_chance
-            eh_dmg = eh_base * (1.0 + player.versatility) * (2.0 if is_crit_eh else 1.0)
+            eh_dmg = eh_base * (1.0 + player.versatility) * (2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus if is_crit_eh else 1.0)
             extra_damage += eh_dmg
 
             extra_damage_details.append({
@@ -390,9 +431,6 @@ class Spell:
             # [Task 3: Xuen's Battlegear - RSK Crit -> FOF CD reduction]
             if self.abbr == 'RSK' and getattr(player, 'has_xuens_battlegear', False):
                 crit_c = breakdown['final_crit']
-                # Removed deterministic EV reduction to avoid double dipping with simulation roll.
-
-                # Simulation Roll:
                 if random.random() < crit_c:
                      if other_spells and 'FOF' in other_spells:
                          other_spells['FOF'].current_cd = max(0, other_spells['FOF'].current_cd - 4.0)
@@ -475,17 +513,6 @@ class Spell:
             modifiers.append("WeaponOfWind: x1.10")
 
         # Universal Energy (Nature/Magic +15%)
-        # RWK is Nature. SOTWL/WDP is Nature?
-        # Prompt: "Jade Ignition, Chi Burst, Thunderfist, RWK 是自然伤害。"
-        # Are SOTWL/WDP nature?
-        # Default damage_type logic:
-        # SOTWL usually Physical/Nature mix or just Physical?
-        # Prompt doesn't explicitly say SOTWL is Nature.
-        # But "Jade Ignition, Chi Burst, Thunderfist, RWK is Nature".
-        # Assuming others Physical unless specified.
-        # Wait, if SOTWL is not Nature, UnivEnergy doesn't apply.
-        # I will check `damage_type` attribute.
-
         is_nature = (self.damage_type == 'Nature')
         if is_rwk: is_nature = True # RWK overrides RSK Physical
 
@@ -541,28 +568,44 @@ class Spell:
              bonus_crit += 0.20
              crit_sources.append("XuensBattlegear: 20.0%")
 
+        # [Task 2] Skyfire Heel (RSK Crit)
+        if self.abbr == 'RSK' and getattr(player, 'has_skyfire_heel', False):
+            # bonus_crit += min(0.20, 0.04 * player.target_count)
+            sfh_bonus = min(0.20, 0.04 * player.target_count)
+            bonus_crit += sfh_bonus
+            crit_sources.append(f"SkyfireHeel: {sfh_bonus*100:.1f}%")
+
+        # [Task 2] TEB Active Bonus
+        if player.zenith_active:
+             bonus_crit += player.teb_active_bonus
+             crit_sources.append(f"TEB(Active): {player.teb_active_bonus*100:.1f}%")
+
         final_crit_chance = min(1.0, base_crit + bonus_crit)
-        crit_mult = 2.0 + self.crit_damage_bonus
+        crit_mult = 2.0 + self.crit_damage_bonus + player.teb_crit_dmg_bonus # TEB Crit Dmg
 
         # Expected Value
         expected_dmg_single = (base_dmg_per_target * current_mult) * (1 + (final_crit_chance * (crit_mult - 1)))
 
         # 3. AOE Scaling
-        # RWK becomes 'cone' or basically AOE.
-        # Prompt: "AOE: 对前方所有敌人造成伤害（分摊机制可简化为全额或 Soft Cap）"
-        # "AOE: Hit all enemies (simplify to full or soft cap)".
-        # Usually RSK is single. RWK makes it AOE.
-        # I'll use 'uncapped' or 'soft_cap' for RWK. "Simplification" -> let's use Soft Cap to be safe or Uncapped?
-        # Prompt says "Soft Cap (5 targets)" for Jadefire.
-        # For RWK, usually it's uncapped or soft capped. Let's stick to Soft Cap for consistency with other AOE.
-
         current_aoe_type = self.aoe_type
         if is_rwk:
              current_aoe_type = 'soft_cap'
         elif self.abbr == 'BOK' and getattr(player, 'has_shadowboxing', False):
             current_aoe_type = 'cleave'
 
+        # [Task 2] Skyfire Heel (Cleave)
+        skyfire_cleave = 0.0
+        if self.abbr == 'RSK' and getattr(player, 'has_skyfire_heel', False):
+             # 10% to neighbors (max 5 targets)
+             # "total_dmg = base_dmg + (base_dmg * 0.10 * min(player.target_count - 1, 5))"
+             # Wait, logic is applied on expected_dmg_single
+             if player.target_count > 1:
+                 extra_count = min(player.target_count - 1, 5)
+                 skyfire_cleave = expected_dmg_single * 0.10 * extra_count
+                 modifiers.append(f"SkyfireCleave: +{int(skyfire_cleave)} ({extra_count} add.)")
+
         total_expected_dmg = self._apply_aoe_scaling(expected_dmg_single, player, current_aoe_type)
+        total_expected_dmg += skyfire_cleave
 
         breakdown = {
             'base': int(base_dmg_per_target),
