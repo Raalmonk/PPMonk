@@ -14,9 +14,13 @@ class SandboxWindow(ctk.CTkToplevel):
         self.spell_book = None
         self.time_elapsed = 0.0
 
+        # History for redrawing
+        self.event_history = []
+
         # UI State
         self.force_proc_glory = tk.BooleanVar(value=False)
         self.force_proc_reset = tk.BooleanVar(value=False)
+        self.target_hp_pct = tk.DoubleVar(value=1.0) # [Task 2]
 
         # Timeline drawing config
         self.pixels_per_second = 50
@@ -39,6 +43,13 @@ class SandboxWindow(ctk.CTkToplevel):
         self.agility_entry = ctk.CTkEntry(top_panel, width=80)
         self.agility_entry.insert(0, "2000")
         self.agility_entry.pack(side="left", padx=5)
+
+        # [Task 2: Target HP]
+        ctk.CTkLabel(top_panel, text="Target HP%:").pack(side="left", padx=5)
+        self.hp_slider = ctk.CTkSlider(top_panel, from_=0.0, to=1.0, number_of_steps=100, variable=self.target_hp_pct, command=self._on_hp_change, width=150)
+        self.hp_slider.pack(side="left", padx=5)
+        self.hp_label = ctk.CTkLabel(top_panel, text="100%")
+        self.hp_label.pack(side="left", padx=2)
 
         # Reset
         ctk.CTkButton(top_panel, text="Reset", command=self._reset_sandbox, fg_color="#C0392B", width=60).pack(side="left", padx=20)
@@ -75,7 +86,17 @@ class SandboxWindow(ctk.CTkToplevel):
         right_panel = ctk.CTkFrame(content)
         right_panel.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-        ctk.CTkLabel(right_panel, text="Tactical Timeline", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=5)
+        # Timeline Header (Zoom controls)
+        tl_header = ctk.CTkFrame(right_panel, fg_color="transparent")
+        tl_header.pack(fill="x", pady=5)
+
+        ctk.CTkLabel(tl_header, text="Tactical Timeline", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
+
+        # [Task 1: Zoom Controls for Sandbox]
+        ctk.CTkButton(tl_header, text="+", width=30, command=self._zoom_in).pack(side="right", padx=2)
+        ctk.CTkButton(tl_header, text="-", width=30, command=self._zoom_out).pack(side="right", padx=2)
+        self.zoom_lbl = ctk.CTkLabel(tl_header, text="Zoom: 50")
+        self.zoom_lbl.pack(side="right", padx=5)
 
         # Timeline Container (Canvas + Scrollbar)
         timeline_container = ctk.CTkFrame(right_panel)
@@ -90,6 +111,34 @@ class SandboxWindow(ctk.CTkToplevel):
 
         self._draw_timeline_grid()
 
+    def _on_hp_change(self, value):
+        self.hp_label.configure(text=f"{int(value*100)}%")
+        if self.player:
+            self.player.target_health_pct = value
+            self._update_button_visuals_only()
+
+    def _zoom_in(self):
+        if self.pixels_per_second < 200:
+            self.pixels_per_second += 10
+            self._redraw_canvas()
+
+    def _zoom_out(self):
+        if self.pixels_per_second > 20:
+            self.pixels_per_second -= 10
+            self._redraw_canvas()
+
+    def _redraw_canvas(self):
+        self.zoom_lbl.configure(text=f"Zoom: {self.pixels_per_second}")
+        self.canvas.delete("all")
+        self._draw_timeline_grid()
+        # Redraw history
+        for evt in self.event_history:
+            self._draw_block(evt['lane_y'], evt['start_time'], evt['duration'], evt['text'], evt['color'], evt['info'])
+
+        # Move Red Line
+        x = self.time_elapsed * self.pixels_per_second
+        self.canvas.coords(self.time_indicator, x, 0, x, self.timeline_height)
+
     def _reset_sandbox(self):
         try:
             agility = float(self.agility_entry.get())
@@ -99,11 +148,24 @@ class SandboxWindow(ctk.CTkToplevel):
             self.agility_entry.insert(0, "2000")
 
         self.player = PlayerState(agility=agility)
-        all_talents = ["1-1", "1-2", "1-3", "2-1", "2-2", "2-3", "WDP", "SW", "Ascension", "Teachings of the Monastery", "Glory of the Dawn"]
+        # Apply HP from slider
+        self.player.target_health_pct = self.target_hp_pct.get()
+
+        # Full Talent List from requirements
+        all_talents = [
+            "1-1",
+            "2-1", "2-2", "2-3",
+            "3-1", "3-2", "3-3", "Ascension",
+            "4-1", "4-2", "4-3",
+            "5-1", "5-2", "5-3", "5-4", "5-5", "5-6",
+            "6-1", "6-2", "6-2_b",
+            "WDP", "SW", "SOTWL"
+        ]
         self.spell_book = SpellBook(talents=all_talents)
         self.spell_book.apply_talents(self.player)
 
         self.time_elapsed = 0.0
+        self.event_history = []
         self.canvas.delete("all")
         self._draw_timeline_grid()
         self._update_status()
@@ -134,19 +196,16 @@ class SandboxWindow(ctk.CTkToplevel):
             self.status_label_xuen.configure(text="Xuen: Inactive", text_color="gray")
 
         # Update button states (CD / Resource)
-        for child in self.spells_frame.winfo_children():
-            if hasattr(child, "spell_key"):
-                self._update_button_visual(child)
+        self._update_button_visuals_only()
 
         # Move Red Line
         x = self.time_elapsed * self.pixels_per_second
         self.canvas.coords(self.time_indicator, x, 0, x, self.timeline_height)
 
-        # Auto scroll if near edge
-        # visible_width = self.canvas.winfo_width()
-        # current_scroll = self.canvas.canvasx(0)
-        # if x > current_scroll + visible_width * 0.8:
-        #     self.canvas.xview_moveto(x / self.canvas_width)
+    def _update_button_visuals_only(self):
+        for child in self.spells_frame.winfo_children():
+            if hasattr(child, "spell_key"):
+                self._update_button_visual(child)
 
     def _update_button_visual(self, btn):
         key = btn.spell_key
@@ -158,9 +217,6 @@ class SandboxWindow(ctk.CTkToplevel):
             btn.configure(text=f"{spell.name} ({spell.current_cd:.1f}s)", fg_color="#555555", state="disabled") # Gray out on CD
         elif not is_usable:
              btn.configure(text=f"{spell.name}", fg_color="#922B21", state="normal") # Red warning if unusable (resource)
-             # Note: We keep it clickable to show "Rejection" message if we want, or just visual cue.
-             # Prompt says: "If CD not ready or resource insufficient, button should be gray or show red border."
-             # CTkButton border is tricky, changing fg_color is easier.
         else:
             btn.configure(text=f"{spell.name}", fg_color="#2E86C1", state="normal")
 
@@ -171,7 +227,7 @@ class SandboxWindow(ctk.CTkToplevel):
 
         # Define spells
         spell_keys = [
-            "TP", "BOK", "RSK", "FOF", "WDP", "SCK", "SOTWL", "SW", "Xuen", "Zenith"
+            "TP", "BOK", "RSK", "FOF", "WDP", "SCK", "SOTWL", "SW", "Xuen", "Zenith", "ToD"
         ]
 
         for key in spell_keys:
@@ -223,8 +279,9 @@ class SandboxWindow(ctk.CTkToplevel):
         if key == "RSK": color = "#E74C3C"
         elif key == "FOF": color = "#8E44AD"
         elif key == "TP": color = "#27AE60"
+        elif key == "ToD": color = "#5B2C6F"
 
-        self._draw_block(
+        self._record_and_draw(
             lane_y=self.active_lane_y,
             start_time=action_start_time,
             duration=step_duration,
@@ -237,12 +294,6 @@ class SandboxWindow(ctk.CTkToplevel):
         self._advance_simulation(step_duration)
 
     def _advance_simulation(self, duration):
-        # We need to process events in small chunks or get them with offsets from player.advance_time
-        # In this refactor, player.advance_time returns events with 'offset'.
-
-        # Current logic in player.advance_time loops with 0.01s steps.
-        # It returns list of events with offset.
-
         base_time = self.time_elapsed
         dmg, events = self.player.advance_time(duration)
         self.spell_book.tick(duration)
@@ -256,7 +307,7 @@ class SandboxWindow(ctk.CTkToplevel):
                 name = event.get('Action')
 
                 # Draw small marker for passive
-                self._draw_block(
+                self._record_and_draw(
                     lane_y=self.passive_lane_y + (0 if "Auto" in name else 25), # Stagger slightly
                     start_time=evt_time,
                     duration=0.1, # Small blip
@@ -267,7 +318,7 @@ class SandboxWindow(ctk.CTkToplevel):
             elif event.get('source') == 'active':
                 # Channel ticks
                 evt_time = base_time + event.get('offset', 0.0)
-                self._draw_block(
+                self._record_and_draw(
                     lane_y=self.active_lane_y + 40, # Below main cast
                     start_time=evt_time,
                     duration=0.1,
@@ -277,6 +328,19 @@ class SandboxWindow(ctk.CTkToplevel):
                 )
 
         self._update_status()
+
+    def _record_and_draw(self, lane_y, start_time, duration, text, color, info):
+        # Record for redraw
+        self.event_history.append({
+            'lane_y': lane_y,
+            'start_time': start_time,
+            'duration': duration,
+            'text': text,
+            'color': color,
+            'info': info
+        })
+        # Draw immediate
+        self._draw_block(lane_y, start_time, duration, text, color, info)
 
     def _draw_block(self, lane_y, start_time, duration, text, color, info):
         x1 = start_time * self.pixels_per_second

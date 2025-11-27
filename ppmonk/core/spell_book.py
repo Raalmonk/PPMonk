@@ -77,6 +77,21 @@ class Spell:
         else:
             player.gcd_remaining = 1.0
 
+        # [Mastery Check for Hit Combo]
+        # Treat first spell (when last_spell_name is None) as a new distinct spell, triggering mastery.
+        triggers_mastery = self.is_combo_strike and (
+                    player.last_spell_name is None or player.last_spell_name != self.abbr)
+
+        # [Task 4: Hit Combo Stacking]
+        if triggers_mastery and getattr(player, 'has_hit_combo', False):
+            player.hit_combo_stacks = min(5, player.hit_combo_stacks + 1)
+
+        if self.is_combo_strike and not triggers_mastery and player.last_spell_name == self.abbr:
+             if getattr(player, 'has_hit_combo', False):
+                 player.hit_combo_stacks = 0
+
+        player.last_spell_name = self.abbr
+
         # 1. Sharp Reflexes
         if self.triggers_sharp_reflexes and other_spells:
             reduction = 1.0
@@ -91,16 +106,52 @@ class Spell:
         if self.abbr == 'TP' and player.has_totm:
             player.totm_stacks = min(4, player.totm_stacks + 1)
 
+        # [Task 4: Brawler's Intensity] - Implemented in Talents by modifying RSK CD / BOK Dmg
+
         extra_damage = 0.0
         extra_damage_details = []
+
+        # [Task 4: Jade Ignition]
+        if self.abbr == 'SCK' and getattr(player, 'has_jade_ignition', False):
+            ji_dmg = 1.80 * player.attack_power
+            # Apply mods? "180% AP". Usually affected by Vers/Crit/HitCombo.
+            # I will treat it as a sub-event that inherits global modifiers.
+
+            # Hit Combo Mod
+            hit_combo_mod = 1.0
+            if getattr(player, 'has_hit_combo', False):
+                hit_combo_mod = 1.0 + (player.hit_combo_stacks * 0.01)
+
+            ji_final = ji_dmg * (1.0 + player.versatility) * hit_combo_mod
+
+            # Crit
+            is_crit_ji = random.random() < player.crit
+            if is_crit_ji:
+                ji_final *= 2.0
+
+            extra_damage += ji_final
+            if damage_meter is not None:
+                damage_meter['Jade Ignition'] = damage_meter.get('Jade Ignition', 0) + ji_final
+
+            extra_damage_details.append({
+                'name': 'Jade Ignition',
+                'damage': ji_final,
+                'crit': is_crit_ji
+            })
 
         if self.abbr == 'BOK' and player.has_totm:
             if player.totm_stacks > 0:
                 extra_hits = player.totm_stacks
                 dmg_per_hit = 0.847 * player.attack_power
+
+                # Hit Combo Mod apply to TotM? Yes.
+                hc_mod = 1.0
+                if getattr(player, 'has_hit_combo', False):
+                    hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
+
                 is_crit = random.random() < (player.crit + self.bonus_crit_chance)
                 crit_m = (2.0 + self.crit_damage_bonus) if is_crit else 1.0
-                total_extra = extra_hits * dmg_per_hit * (1 + player.versatility) * crit_m
+                total_extra = extra_hits * dmg_per_hit * (1 + player.versatility) * crit_m * hc_mod
                 extra_damage += total_extra
 
                 if damage_meter is not None:
@@ -135,9 +186,14 @@ class Spell:
 
             if should_proc_glory:
                 glory_dmg = 1.0 * player.attack_power
+
+                hc_mod = 1.0
+                if getattr(player, 'has_hit_combo', False):
+                    hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
+
                 is_crit = random.random() < (player.crit + self.bonus_crit_chance)
                 crit_m = (2.0 + self.crit_damage_bonus) if is_crit else 1.0
-                final_glory = glory_dmg * (1 + player.versatility) * crit_m
+                final_glory = glory_dmg * (1 + player.versatility) * crit_m * hc_mod
                 extra_damage += final_glory
                 player.chi = min(player.max_chi, player.chi + 1)
                 if damage_meter is not None:
@@ -177,10 +233,6 @@ class Spell:
                 'crit': is_crit_eh
             })
 
-        triggers_mastery = self.is_combo_strike and (player.last_spell_name is not None) and (
-                    player.last_spell_name != self.abbr)
-        player.last_spell_name = self.abbr
-
         if self.is_channeled:
             cast_t = self.get_effective_cast_time(player)
             player.is_channeling = True
@@ -218,22 +270,48 @@ class Spell:
         dmg_mod = 1.0
 
         # Spell Specific Mods
-        spell_mod = 1.0
-        if self.abbr == 'RSK':
-            spell_mod *= 1.70
-        if self.abbr == 'SCK':
-            spell_mod *= 1.10
+        spell_mod = self.damage_multiplier # Modified by talents
         if spell_mod != 1.0:
-            modifiers['Spell'] = spell_mod
+             modifiers['Talent/Spell'] = spell_mod
         dmg_mod *= spell_mod
 
-        # Aura Mod
+        if self.abbr == 'RSK':
+            # Base RSK mod moved to ap_coeff or damage_multiplier via Talent or Init?
+            # Original code: "spell_mod *= 1.70". This seems to be a hardcoded boost for RSK separate from ap_coeff.
+            # I will keep it for now unless I changed ap_coeff in SpellBook.
+            # RSK AP is 4.228.
+            pass # No additional hardcoded mod needed if AP is correct, but let's keep original logic if it wasn't broken,
+                 # BUT I should check if the original code had it.
+                 # Original code:
+                 # if self.abbr == 'RSK': spell_mod *= 1.70
+                 # if self.abbr == 'SCK': spell_mod *= 1.10
+                 # Wait, these look like hidden aura buffs.
+            pass
+
+        # Re-apply Hardcoded Aura Mods from original file (preserved)
+        # Note: damage_multiplier in my new class handles Talent boosts.
+        # I need to be careful not to double dip or lose the 1.7x
+
+        hidden_mod = 1.0
+        if self.abbr == 'RSK': hidden_mod *= 1.70
+        if self.abbr == 'SCK': hidden_mod *= 1.10
+        if hidden_mod != 1.0:
+            modifiers['HiddenAura'] = hidden_mod
+            dmg_mod *= hidden_mod
+
+        # Aura Mod (Global)
         aura_mod = 1.04
         if self.abbr in ['TP', 'BOK', 'RSK', 'SCK', 'FOF', 'WDP', 'SOTWL']:
             aura_mod *= 1.04
         if aura_mod != 1.0:
             modifiers['Aura'] = aura_mod
         dmg_mod *= aura_mod
+
+        # [Task 4: Hit Combo]
+        if getattr(player, 'has_hit_combo', False) and player.hit_combo_stacks > 0:
+            hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
+            modifiers['HitCombo'] = hc_mod
+            dmg_mod *= hc_mod
 
         if self.haste_dmg_scaling:
             h_mod = (1.0 + player.haste)
@@ -261,11 +339,6 @@ class Spell:
         crit_mult = 2.0 + self.crit_damage_bonus
         expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
 
-        # Flags for crit
-        # Note: Expected damage includes crit average.
-        # Ideally we might want to flag 'Crit' if we were simulating a single hit,
-        # but for expected damage we just show the chance.
-
         breakdown = {
             'base': int(base_dmg),
             'modifiers': modifiers,
@@ -285,6 +358,56 @@ class Spell:
                 if self.charges < self.max_charges:
                     self.current_cd = self.base_cd
 
+# [Task 2: Touch of Death Class]
+class TouchOfDeath(Spell):
+    def is_usable(self, player, other_spells):
+        if not super().is_usable(player): return False
+        # Condition: target_health_pct < 0.15
+        if player.target_health_pct >= 0.15: return False
+        return True
+
+    def calculate_tick_damage(self, player, mastery_override=None, tick_idx=0):
+        # 35% of Max Health
+        base_dmg = player.max_health * 0.35
+
+        # True Damage logic: Unaffected by Armor/Dr/Versatility?
+        # Prompt: "Physical damage (unaffected by armor mitigation)".
+        # In this sim, we usually apply Versatility to everything unless specified.
+        # But "True Damage" usually implies fixed value.
+        # However, the prompt says "Touch of Death (ToD)... 35% of Max HP... Physical (unaffected by armor)".
+        # Since we don't simulate armor reduction here (all phys is just AP * coeff),
+        # we can treat it as a flat damage value.
+        # DOES IT CRIT? ToD usually doesn't crit.
+        # DOES IT SCALE WITH HIT COMBO? "Damage increased by 15% (Meridian Strikes)".
+        # Hit Combo is global dmg increase.
+        # I will apply Talent Multipliers and Global Modifiers (like Hit Combo), but maybe not Crit/Vers if it's "True".
+        # But usually in WoW ToD is specific.
+        # Let's assume it scales with: Talent Modifiers (Meridian) and Hit Combo.
+        # I will include Versatility too as it's a global outgoing dmg mod.
+
+        modifiers = {}
+        dmg_mod = 1.0
+
+        if self.damage_multiplier != 1.0:
+             modifiers['Talent'] = self.damage_multiplier
+             dmg_mod *= self.damage_multiplier
+
+        if getattr(player, 'has_hit_combo', False) and player.hit_combo_stacks > 0:
+            hc_mod = 1.0 + (player.hit_combo_stacks * 0.01)
+            modifiers['HitCombo'] = hc_mod
+            dmg_mod *= hc_mod
+
+        final_dmg = base_dmg * dmg_mod
+
+        breakdown = {
+            'base': int(base_dmg),
+            'modifiers': modifiers,
+            'flags': ['True Damage'],
+            'crit_chance': 0.0,
+            'crit_mult': 1.0,
+            'final_mod': dmg_mod
+        }
+        return final_dmg, breakdown
 
 class SpellWDP(Spell):
     def is_usable(self, player, other_spells):
@@ -315,7 +438,8 @@ class SpellBook:
             'SOTWL': Spell('SOTWL', 15.12, name="Strike of the Windlord", chi_cost=2, cd=30.0, req_talent=True, category='Minor Cooldown'),
             'SW': Spell('SW', 8.96, name="Slicing Winds", cd=30.0, cast_time=0.4, req_talent=True, gcd_override=0.4, category='Minor Cooldown'),
             'Xuen': Spell('Xuen', 0.0, name="Invoke Xuen", cd=120.0, req_talent=True, gcd_override=0.0, category='Major Cooldown'),
-            'Zenith': Spell('Zenith', 0.0, name="Zenith", cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown')
+            'Zenith': Spell('Zenith', 0.0, name="Zenith", cd=90.0, req_talent=False, max_charges=2, gcd_override=0.0, category='Major Cooldown'),
+            'ToD': TouchOfDeath('ToD', 0.0, name="Touch of Death", cd=90.0, energy=0, chi_gen=3, req_talent=False, category='Major Cooldown') # [Task 2]
         }
         self.spells['TP'].triggers_combat_wisdom = True
         self.spells['BOK'].triggers_sharp_reflexes = True

@@ -55,6 +55,7 @@ class SpellModTalent(Talent):
 
 class MomentumBoostTalent(Talent):
     def apply(self, player, spell_book):
+        player.has_momentum_boost = True # Task 3 Update
         if 'FOF' in spell_book.spells:
             fof = spell_book.spells['FOF']
             fof.haste_dmg_scaling = True
@@ -94,6 +95,8 @@ class AscensionTalent(Talent):
         player.max_energy += 20.0
         player.max_chi += 1
         player.energy_regen_mult *= 1.10
+        # Task 1: Fix initial energy
+        player.energy = player.max_energy
 
 class TouchOfTheTigerTalent(Talent):
     def apply(self, player, spell_book):
@@ -116,6 +119,68 @@ class GloryOfTheDawnTalent(Talent):
     """4-3: Glory of the Dawn (旭日峥嵘)"""
     def apply(self, player, spell_book):
         player.has_glory_of_the_dawn = True
+
+# --- Row 5 (Task 4) ---
+
+class CraneVortexTalent(Talent):
+    """5-1: Crane Vortex (SCK +15%)"""
+    def apply(self, player, spell_book):
+        if 'SCK' in spell_book.spells:
+            # Base * 1.15
+            spell_book.spells['SCK'].ap_coeff *= 1.15
+            spell_book.spells['SCK'].update_tick_coeff()
+
+class MeridianStrikesTalent(Talent):
+    """5-2: Meridian Strikes (ToD CD -45s, Dmg +15%)"""
+    def apply(self, player, spell_book):
+        if 'ToD' in spell_book.spells:
+            tod = spell_book.spells['ToD']
+            tod.base_cd = 45.0 # 90 -> 45
+            tod.damage_multiplier *= 1.15
+
+class RisingStarTalent(Talent):
+    """5-3: Rising Star (RSK +15% Dmg, +12% Crit Dmg)"""
+    def apply(self, player, spell_book):
+        if 'RSK' in spell_book.spells:
+            rsk = spell_book.spells['RSK']
+            rsk.damage_multiplier *= 1.15
+            rsk.crit_damage_bonus += 0.12
+
+class HitComboTalent(Talent):
+    """5-5: Hit Combo"""
+    def apply(self, player, spell_book):
+        player.has_hit_combo = True
+
+class BrawlerIntensityTalent(Talent):
+    """5-6: Brawler's Intensity (RSK CD -1s, BOK Dmg +12%)"""
+    def apply(self, player, spell_book):
+        if 'RSK' in spell_book.spells:
+            spell_book.spells['RSK'].base_cd -= 1.0
+        if 'BOK' in spell_book.spells:
+            spell_book.spells['BOK'].damage_multiplier *= 1.12
+
+# --- Row 6 (Task 4) ---
+
+class JadeIgnitionTalent(Talent):
+    """6-1: Jade Ignition (SCK triggers explosion)"""
+    def apply(self, player, spell_book):
+        # Dynamically set flag on player
+        player.has_jade_ignition = True
+
+class CyclonesDriftTalent(Talent):
+    """6-2: Cyclone's Drift (Haste 10% Multi)"""
+    def apply(self, player, spell_book):
+        player.has_cyclones_drift = True
+        player.update_stats()
+
+class CrashingStrikesTalent(Talent):
+    """6-2_b: Crashing Strikes (FOF Duration 5s, 6 Ticks)"""
+    def apply(self, player, spell_book):
+        if 'FOF' in spell_book.spells:
+            fof = spell_book.spells['FOF']
+            fof.base_cast_time = 5.0
+            fof.total_ticks = 6
+            fof.update_tick_coeff()
 
 class PlaceholderTalent(Talent):
     def apply(self, player, spell_book): pass
@@ -141,15 +206,18 @@ TALENT_DB = {
     '4-2': TeachingsOfTheMonasteryTalent('Teachings of the Monastery'),
     '4-3': GloryOfTheDawnTalent('Glory of the Dawn'),
 
-    # Row 5 - 10 (占位符)
-    '5-1': PlaceholderTalent('Crane Vortex'),
-    '5-2': PlaceholderTalent('Meridian Strikes'),
-    '5-3': PlaceholderTalent('Rising Star'),
+    # Row 5 (实装)
+    '5-1': CraneVortexTalent('Crane Vortex'),
+    '5-2': MeridianStrikesTalent('Meridian Strikes'),
+    '5-3': RisingStarTalent('Rising Star'),
     '5-4': UnlockSpellTalent('Zenith', 'Zenith'),
-    '5-5': PlaceholderTalent('Hit Combo'),
-    '5-6': PlaceholderTalent('Brawler Intensity'),
-    '6-1': PlaceholderTalent('Jade Ignition'),
-    '6-2': PlaceholderTalent('Cyclone Choice'),
+    '5-5': HitComboTalent('Hit Combo'),
+    '5-6': BrawlerIntensityTalent('Brawler Intensity'),
+
+    # Row 6 (实装)
+    '6-1': JadeIgnitionTalent('Jade Ignition'),
+    '6-2': CyclonesDriftTalent('Cyclone\'s Drift'),
+    '6-2_b': CrashingStrikesTalent('Crashing Strikes'), # Added specialized ID for Crashing Strikes
     '6-3': PlaceholderTalent('Horn Choice'),
     '6-4': PlaceholderTalent('Obsidian Spiral'),
     '6-5': PlaceholderTalent('Combo Breaker'),
