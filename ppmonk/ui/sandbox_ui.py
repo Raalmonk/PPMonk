@@ -53,6 +53,9 @@ class SandboxWindow(ctk.CTkToplevel):
         self.active_talents = active_talents if active_talents else []
         self.player_stats = player_stats if player_stats else {}
 
+        # [Fix] Initialize target_count so ui.py doesn't crash when setting it
+        self.target_count = ctk.IntVar(value=1)
+
         # Core Data Structure
         self.action_sequence = [] # List of dicts: {'name': 'RSK', 'settings': {}, 'uuid': ...}
 
@@ -67,8 +70,8 @@ class SandboxWindow(ctk.CTkToplevel):
         self.lane_y = 100
         self.block_map = {}
 
-        self._build_ui()
         self._init_spellbook()
+        self._build_ui()
         self._recalculate_timeline()
 
     def _init_spellbook(self):
