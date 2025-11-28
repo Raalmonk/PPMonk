@@ -36,6 +36,8 @@ def run_simulation(
         log_callback=print,
         status_callback=None,
         stop_event=None,
+        target_count=1,
+        **kwargs
 ):
     if talents is None: talents = ['WDP', 'SW', 'Ascension', 'Zenith']
 
@@ -46,7 +48,8 @@ def run_simulation(
         'rating_haste': float(haste_rating),
         'rating_crit': float(crit_rating),
         'rating_mastery': float(mastery_rating),
-        'rating_vers': float(vers_rating)
+        'rating_vers': float(vers_rating),
+        'target_count': int(target_count)
     }
 
     log(f">>> 初始化 PPMonk (UI 模式)...")
