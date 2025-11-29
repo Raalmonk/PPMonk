@@ -115,6 +115,9 @@
 * **10-6 Airborne Rhythm**: SW generates `2 Chi`.
 * **10-7 Path of Jade**: Jadefire Dmg `+10%` per target.
 
+* **Default Talents**: The default loadout has been updated to a specific high-performance list.
+* **TEB Buff (Row 9)**: Max Rank is now correctly set to **2** (was listed as 1 in UI).
+
 ---
 
 ## 5. Hero Talents: Shado-Pan (Physical Focus)
@@ -179,3 +182,31 @@
 * **Choice Node 2**:
     * **Restore Balance**: Damage `+5%` while Xuen is active.
     * **Xuen's Bond**: Xuen damage `+30%`, CD `-30s`.
+
+    ## 7. User Interface & Visualization
+
+### 7.1 Main UI (ui.py)
+* **Localization**: All labels, buttons, and status text are now in **Simplified Chinese**.
+* **Default Settings**:
+    * Default Talents: `['1-1', '3-2', '6-4', '5-6', '2-3', '5-2', '4-1', '7-1', '6-3', '10-3', 'hero-sp-choice1', '8-1', '2-1', '10-6', '5-4', '9-1', '5-5', '4-2', '5-3', '7-3', '9-3', '4-3', '2-2', '9-7', 'hero-sp-header', '8-6', '8-4', '10-5', '8-5_b', '9-5', '6-2_b', '3-4', '9-4']`
+    * Target Count: Adjustable via UI slider (1-20).
+
+### 7.2 Sandbox (sandbox_ui.py)
+* **Stat Editing**: Users can now directly modify Agility, Crit, Haste, Mastery, and Versatility within the Sandbox window to test scaling in real-time.
+* **Trigger Controls**: New palette buttons to force specific procs:
+    * **Force RSK Reset**: Guarantees the next relevant cast resets RSK.
+    * **Force Combo Breaker**: Guarantees the next TP grants Blackout Kick!.
+* **Damage Analysis**:
+    * **FOF Consolidation**: Clicking a "Fists of Fury" block in the timeline now shows the **Total Damage** (sum of all ticks) alongside the breakdown of individual ticks.
+
+### 7.3 Timeline Visualization (visualizer.py / timeline_view.py)
+* **5-Row Layout**:
+    1.  Major Cooldowns (Xuen, SEF, Zenith etc.)
+    2.  Minor Cooldowns (SW, WDP, etc.)
+    3.  Major Filler (FOF, RSK)
+    4.  Minor Filler (TP, BOK, SCK)
+    5.  **Triggers/Passives** (New): Displays proc events like *Expel Harm* (Combat Wisdom), *Zenith Impact*, *Jade Ignition*, etc.
+
+### 5.4 Talent UI (talent_ui.py)
+* **TEB Buff**: Rank cap corrected to 2.
+* **Localization**: Talent names and descriptions displayed in Chinese.
