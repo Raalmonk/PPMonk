@@ -46,6 +46,14 @@
 | **Zenith** (Cast) | - | **10.0** | **Nature** | 0 | 90s | Soft Cap 5 AOE. 2 Charges. |
 | **Auto Attack** | AA | 2.4(2H)/1.8(DW)| Physical | - | 3.5s/2.6s | Affected by Haste. |
 
+**Zenith**: 
+    * Type: Nature (Magic)
+    * Cooldown: 90s (2 Charges)
+    * **GCD**: 0.0s (Off-GCD)
+    * **Cast Time**: Instant
+    * *Note*: In the Sandbox Input view, blocks are fixed-width for editing. Use "View Detailed Timeline" to see accurate 0s duration.
+    
+
 ---
 
 ## 3. Base Traits (Passive)
