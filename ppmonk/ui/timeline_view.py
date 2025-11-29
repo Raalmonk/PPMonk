@@ -14,7 +14,7 @@ LEFT_MARGIN = 200
 class NativeTimelineWindow(ctk.CTkToplevel):
     def __init__(self, parent, timeline_data, assets_path="assets/abilityIcons"):
         super().__init__(parent)
-        self.title("Combat Timeline Analysis")
+        self.title("战斗时间轴分析")
         self.geometry("1600x800")
 
         self.data = timeline_data
@@ -27,10 +27,10 @@ class NativeTimelineWindow(ctk.CTkToplevel):
         self.control_panel = ctk.CTkFrame(self, height=40)
         self.control_panel.pack(side="top", fill="x", padx=10, pady=5)
 
-        ctk.CTkLabel(self.control_panel, text="Zoom:").pack(side="left", padx=5)
+        ctk.CTkLabel(self.control_panel, text="缩放:").pack(side="left", padx=5)
         ctk.CTkButton(self.control_panel, text="-", width=30, command=self._zoom_out).pack(side="left", padx=2)
         ctk.CTkButton(self.control_panel, text="+", width=30, command=self._zoom_in).pack(side="left", padx=2)
-        self.zoom_label = ctk.CTkLabel(self.control_panel, text=f"{self.pixels_per_sec} px/s")
+        self.zoom_label = ctk.CTkLabel(self.control_panel, text=f"{self.pixels_per_sec} 像素/秒")
         self.zoom_label.pack(side="left", padx=5)
 
         self.scroll_frame = ctk.CTkFrame(self)
@@ -57,13 +57,13 @@ class NativeTimelineWindow(ctk.CTkToplevel):
     def _zoom_in(self):
         if self.pixels_per_sec < 400:
             self.pixels_per_sec += 10
-            self.zoom_label.configure(text=f"{self.pixels_per_sec} px/s")
+            self.zoom_label.configure(text=f"{self.pixels_per_sec} 像素/秒")
             self._draw_scene()
 
     def _zoom_out(self):
         if self.pixels_per_sec > 20:
             self.pixels_per_sec -= 10
-            self.zoom_label.configure(text=f"{self.pixels_per_sec} px/s")
+            self.zoom_label.configure(text=f"{self.pixels_per_sec} 像素/秒")
             self._draw_scene()
 
     def _on_mousewheel(self, event):
@@ -208,7 +208,7 @@ class NativeTimelineWindow(ctk.CTkToplevel):
 
     def _show_tooltip(self, event, name, info):
         top = ctk.CTkToplevel(self)
-        top.title(f"Details: {name}")
+        top.title(f"详情: {name}")
 
         # Fixed large size to prevent truncation
         top.geometry("900x800")
@@ -217,10 +217,10 @@ class NativeTimelineWindow(ctk.CTkToplevel):
         content_frame = ctk.CTkScrollableFrame(top)
         content_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(content_frame, text=f"Action: {name}", font=("Arial", 20, "bold")).pack(anchor="w", pady=5)
+        ctk.CTkLabel(content_frame, text=f"动作: {name}", font=("Arial", 20, "bold")).pack(anchor="w", pady=5)
 
         dmg_val = int(info.get('Damage', 0))
-        ctk.CTkLabel(content_frame, text=f"Damage: {dmg_val}", font=("Arial", 18, "bold"), text_color="#E67E22").pack(anchor="w", pady=5)
+        ctk.CTkLabel(content_frame, text=f"伤害: {dmg_val}", font=("Arial", 18, "bold"), text_color="#E67E22").pack(anchor="w", pady=5)
 
         breakdown = info.get('Breakdown')
         text_info = ""
@@ -228,34 +228,34 @@ class NativeTimelineWindow(ctk.CTkToplevel):
         if isinstance(breakdown, dict):
             # Formatted text based on Task 2 structure
             if 'raw_base' in breakdown:
-                 text_info += f"Raw Base: {breakdown['raw_base']:.1f}\n"
+                 text_info += f"基础伤害: {breakdown['raw_base']:.1f}\n"
             if 'components' in breakdown:
-                 text_info += f"Formula: {breakdown['components']}\n\n"
+                 text_info += f"公式: {breakdown['components']}\n\n"
 
             mods = breakdown.get('modifiers', [])
             if mods:
-                text_info += "Modifiers:\n"
+                text_info += "修正:\n"
                 if isinstance(mods, list):
                     for m in mods: text_info += f" • {m}\n"
                 text_info += "\n"
 
             crit_src = breakdown.get('crit_sources', [])
             if crit_src:
-                text_info += "Crit Sources:\n"
+                text_info += "暴击来源:\n"
                 for c in crit_src: text_info += f" • {c}\n"
                 text_info += "\n"
 
-            text_info += f"Final Crit Chance: {breakdown.get('final_crit', 0)*100:.1f}%\n"
-            text_info += f"Crit Multiplier: {breakdown.get('crit_mult', 2.0):.2f}x\n"
-            text_info += f"Is Crit: {breakdown.get('is_crit', False)}\n"
+            text_info += f"最终暴击率: {breakdown.get('final_crit', 0)*100:.1f}%\n"
+            text_info += f"暴击倍率: {breakdown.get('crit_mult', 2.0):.2f}x\n"
+            text_info += f"是否暴击: {breakdown.get('is_crit', False)}\n"
 
             if 'snapshot_dmg' in breakdown:
-                 text_info += f"\nSnapshot Damage: {breakdown['snapshot_dmg']:.1f}\n"
+                 text_info += f"\n快照伤害: {breakdown['snapshot_dmg']:.1f}\n"
             if 'expected_dmg' in breakdown:
-                 text_info += f"Expected Damage: {breakdown['expected_dmg']:.1f}\n"
+                 text_info += f"期望伤害: {breakdown['expected_dmg']:.1f}\n"
 
             if 'extra_events' in breakdown:
-                text_info += "\nExtra Events:\n"
+                text_info += "\n额外事件:\n"
                 for extra in breakdown['extra_events']:
                      text_info += f" • {extra['name']}: {int(extra.get('damage',0))}\n"
 

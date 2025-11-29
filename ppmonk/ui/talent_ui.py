@@ -65,7 +65,8 @@ MONK_TALENT_DATA = [
     {"id": "8-7", "label": "Memory of\nMonastery", "row": 7, "col": 6, "max_rank": 1, "req": ["7-4", "7-5"]},
 
     # --- Row 9 ---
-    {"id": "9-1", "label": "TEB\nBuff", "row": 8, "col": 0, "max_rank": 1, "req": ["8-1"]},
+    # Task 2: max_rank 2
+    {"id": "9-1", "label": "TEB\nBuff", "row": 8, "col": 0, "max_rank": 2, "req": ["8-1"]},
     {"id": "9-2", "label": "Rushing\nJade Wind", "row": 8, "col": 1, "max_rank": 1, "req": ["8-2"]},
     {"id": "9-3", "label": "Xuen's\nBattlegear", "row": 8, "col": 2, "max_rank": 1, "req": ["8-2", "8-3", "8-4"]},
     {"id": "9-4", "label": "Thunderfist", "row": 8, "col": 3, "max_rank": 1, "req": ["8-5"]},
@@ -183,7 +184,7 @@ class TalentNode:
 class TalentTreeWindow(ctk.CTkToplevel):
     def __init__(self, parent, on_close_callback):
         super().__init__(parent)
-        self.title("Monk Talent Tree")
+        self.title("武僧天赋树")
         self.geometry("1400x950")
         self.on_close_callback = on_close_callback
 
@@ -217,13 +218,13 @@ class TalentTreeWindow(ctk.CTkToplevel):
         self.control_panel = ctk.CTkFrame(self, height=60, fg_color="#222222")
         self.control_panel.place(relx=0, rely=1.0, anchor="sw", relwidth=1.0)
 
-        self.info_label = ctk.CTkLabel(self.control_panel, text="Points Spent: 0", font=("Arial", 14, "bold"))
+        self.info_label = ctk.CTkLabel(self.control_panel, text="已投入点数: 0", font=("Arial", 14, "bold"))
         self.info_label.pack(side="left", padx=20, pady=10)
 
-        save_btn = ctk.CTkButton(self.control_panel, text="Apply & Close", command=self._on_save, fg_color="#1b8f61", width=150)
+        save_btn = ctk.CTkButton(self.control_panel, text="应用 & 关闭", command=self._on_save, fg_color="#1b8f61", width=150)
         save_btn.pack(side="right", padx=20, pady=10)
 
-        reset_btn = ctk.CTkButton(self.control_panel, text="Reset All", command=self._on_reset, fg_color="#c0392b", width=100)
+        reset_btn = ctk.CTkButton(self.control_panel, text="重置全部", command=self._on_reset, fg_color="#c0392b", width=100)
         reset_btn.pack(side="right", padx=10, pady=10)
 
         self._build_tree()
@@ -316,7 +317,7 @@ class TalentTreeWindow(ctk.CTkToplevel):
             is_active = node.current_rank > 0
             is_avail = self._is_node_available(node_id)
             node.update_visual(is_active, is_avail)
-        self.info_label.configure(text=f"Points Spent: {total_points}")
+        self.info_label.configure(text=f"已投入点数: {total_points}")
 
     def _on_reset(self):
         for node in self.nodes.values():

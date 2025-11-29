@@ -143,7 +143,10 @@ def run_simulation(
                 f"{log_details['Expected DMG']:<12.2f}"
             )
             log(log_str)
-            collector.log_cast(t_now, act_name, duration=duration, damage=dmg)
+            collector.log_cast(t_now, act_name, duration=duration, damage=dmg, info=log_details)
+            if 'extra_events' in log_details:
+                for extra in log_details['extra_events']:
+                     collector.log_cast(t_now, extra['name'], duration=0.1, damage=extra.get('damage', 0), info=extra)
         elif dmg > 0:
             log(f"{t_now:<6.1f} | {'(Tick)':<8} | {int(chi):<3} | {int(en):<4} | {'-':<10} | {'-':<8} | {'-':<6} | {'-':<10} | {dmg:<12.2f}")
         auto_attack_logs = info.get('auto_attack_logs', [])
@@ -155,6 +158,7 @@ def run_simulation(
                 f"{log_entry['Expected DMG']:<12.2f}"
             )
             log(log_str)
+            collector.log_cast(t_now, log_entry['Action'], duration=0.1, damage=log_entry.get('Expected DMG', 0), info=log_entry)
     log(f"{'-' * 30}")
     log(f"Total Damage Output: {total_damage:.2f}")
 
@@ -194,7 +198,7 @@ def run_simulation(
     if status_callback: status_callback("Complete", 1.0)
 
     return {
-        "total_ap": total_ap,
+        "total_ap": total_damage_dealt,
         "scenario": scenario_name,
         "timeline_data": collector.get_data(),
     }
