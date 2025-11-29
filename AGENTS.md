@@ -205,7 +205,7 @@
     2.  Minor Cooldowns (SW, WDP, etc.)
     3.  Major Filler (FOF, RSK)
     4.  Minor Filler (TP, BOK, SCK)
-    5.  **Triggers/Passives** (New): Displays proc events like *Expel Harm* (Combat Wisdom), *Zenith Impact*, *Jade Ignition*, etc.
+    5.  **Triggers/Passives** (New): Displays proc events like *Expel Harm* (Combat Wisdom), *Zenith Impact*, *Jade Ignition*, etc. melee
 
 ### 5.4 Talent UI (talent_ui.py)
 * **TEB Buff**: Rank cap corrected to 2.
