@@ -18,13 +18,13 @@ class TimelineDataCollector:
             'SEF': {'group': 0, 'color': '#2ecc71'},
             'ToD': {'group': 0, 'color': '#c0392b'},
             'Conduit': {'group': 0, 'color': '#f1c40f'},
+            'Zenith': {'group': 0, 'color': '#8e44ad'},
 
             # Group 1: Minor CD
             'RSK': {'group': 1, 'color': '#f39c12'},
             'WDP': {'group': 1, 'color': '#d35400'},
             'SOTWL': {'group': 1, 'color': '#c0392b'},
             'SW': {'group': 1, 'color': '#16a085'},
-            'Zenith': {'group': 1, 'color': '#8e44ad'},
 
             # Group 2: Major Filler
             'FOF': {'group': 2, 'color': '#e74c3c'},
