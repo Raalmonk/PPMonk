@@ -34,7 +34,7 @@ class PPMonkApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("PPMonk AI Simulator")
+        self.title("PPMonk AI 模拟器")
         self.geometry("1200x780")
         self.minsize(1100, 720)
 
@@ -42,11 +42,14 @@ class PPMonkApp(ctk.CTk):
         self.running = False
         self.stop_event = threading.Event()
 
-        self.status_var = ctk.StringVar(value="Ready")
+        self.status_var = ctk.StringVar(value="就绪")
         self.total_ap_var = ctk.StringVar(value="--")
         self.scenario_var = ctk.StringVar(value="Patchwerk")
-        self.target_count_var = ctk.IntVar(value=1) # [Task 7: Target Count]
+        self.target_count_var = ctk.IntVar(value=1)
         self.last_timeline_data = None
+
+        # Task 1: Update Default Talents
+        self.active_talents_list = ['1-1', '3-2', '6-4', '5-6', '2-3', '5-2', '4-1', '7-1', '6-3', '10-3', 'hero-sp-choice1', '8-1', '2-1', '10-6', '5-4', '9-1', '5-5', '4-2', '5-3', '7-3', '9-3', '4-3', '2-2', '9-7', 'hero-sp-header', '8-6', '8-4', '10-5', '8-5_b', '9-5', '6-2_b', '3-4', '9-4']
 
         self._build_layout()
         self.after(100, self._process_log_queue)
@@ -63,7 +66,7 @@ class PPMonkApp(ctk.CTk):
 
         title = ctk.CTkLabel(
             sidebar,
-            text="PPMonk AI Simulator",
+            text="PPMonk AI 模拟器",
             font=ctk.CTkFont(size=20, weight="bold"),
         )
         title.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="w")
@@ -74,6 +77,14 @@ class PPMonkApp(ctk.CTk):
             "Mastery": ctk.DoubleVar(value=40.0),
             "Versatility": ctk.DoubleVar(value=10.0),
         }
+
+        stat_labels_zh = {
+            "Haste": "急速",
+            "Crit": "暴击",
+            "Mastery": "精通",
+            "Versatility": "全能"
+        }
+
         stat_ranges = {
             "Haste": (0, 50),
             "Crit": (0, 50),
@@ -86,7 +97,7 @@ class PPMonkApp(ctk.CTk):
             frame.grid(row=idx, column=0, padx=20, pady=6, sticky="ew")
             frame.grid_columnconfigure(1, weight=1)
 
-            label = ctk.CTkLabel(frame, text=f"{name}")
+            label = ctk.CTkLabel(frame, text=stat_labels_zh.get(name, name))
             label.grid(row=0, column=0, padx=(8, 4), pady=8, sticky="w")
 
             slider = ctk.CTkSlider(
@@ -106,24 +117,21 @@ class PPMonkApp(ctk.CTk):
             entry.bind("<Return>", lambda event, n=name: self._sync_entry_to_var(event, n))
             setattr(self, f"{name.lower()}_entry", entry)
 
-        talents_label = ctk.CTkLabel(sidebar, text="Talents", font=ctk.CTkFont(weight="bold"))
+        talents_label = ctk.CTkLabel(sidebar, text="天赋", font=ctk.CTkFont(weight="bold"))
         talents_label.grid(row=5, column=0, padx=20, pady=(16, 4), sticky="w")
 
         talent_btn = ctk.CTkButton(
             sidebar,
-            text="Open Talent Calculator",
+            text="打开天赋模拟器",
             fg_color="#5B2C6F",
             command=self._open_talent_window,
         )
         talent_btn.grid(row=6, column=0, padx=20, pady=10, sticky="ew")
 
-        self.talent_summary_label = ctk.CTkLabel(sidebar, text="Selected: Default")
+        self.talent_summary_label = ctk.CTkLabel(sidebar, text=f"已选: {len(self.active_talents_list)} 天赋")
         self.talent_summary_label.grid(row=7, column=0, padx=20, pady=0)
 
-        self.active_talents_list = ["1-1", "2-1", "2-2", "WDP", "SW", "Ascension"]
-        self.talent_summary_label.configure(text=f"Selected: {len(self.active_talents_list)} nodes")
-
-        scenario_label = ctk.CTkLabel(sidebar, text="Scenario", font=ctk.CTkFont(weight="bold"))
+        scenario_label = ctk.CTkLabel(sidebar, text="场景", font=ctk.CTkFont(weight="bold"))
         scenario_label.grid(row=9, column=0, padx=20, pady=(16, 4), sticky="w")
 
         scenario_menu = ctk.CTkOptionMenu(
@@ -133,8 +141,7 @@ class PPMonkApp(ctk.CTk):
         )
         scenario_menu.grid(row=10, column=0, padx=20, pady=6, sticky="ew")
 
-        # [Task 7: Target Count UI]
-        target_label = ctk.CTkLabel(sidebar, text="Target Count", font=ctk.CTkFont(weight="bold"))
+        target_label = ctk.CTkLabel(sidebar, text="目标数量", font=ctk.CTkFont(weight="bold"))
         target_label.grid(row=11, column=0, padx=20, pady=(10, 4), sticky="w")
 
         target_frame = ctk.CTkFrame(sidebar)
@@ -154,7 +161,7 @@ class PPMonkApp(ctk.CTk):
 
         start_btn = ctk.CTkButton(
             sidebar,
-            text="Start Simulation",
+            text="开始模拟",
             fg_color="#1b8f61",
             hover_color="#146645",
             command=self._start_simulation,
@@ -164,7 +171,7 @@ class PPMonkApp(ctk.CTk):
 
         self.stop_btn = ctk.CTkButton(
             sidebar,
-            text="Stop Training",
+            text="停止训练",
             fg_color="#c0392b",
             hover_color="#922b21",
             state="disabled",
@@ -174,7 +181,7 @@ class PPMonkApp(ctk.CTk):
 
         self.timeline_btn = ctk.CTkButton(
             sidebar,
-            text="View Timeline",
+            text="查看时间轴",
             state="disabled",
             command=self._open_timeline,
         )
@@ -182,7 +189,7 @@ class PPMonkApp(ctk.CTk):
 
         self.sandbox_btn = ctk.CTkButton(
             sidebar,
-            text="Manual Sandbox",
+            text="手动沙盒",
             fg_color="#D35400",
             hover_color="#A04000",
             command=self._open_sandbox,
@@ -205,7 +212,7 @@ class PPMonkApp(ctk.CTk):
         self.progress.set(0)
         self.progress.grid(row=0, column=1, padx=10, pady=12, sticky="ew")
 
-        log_label = ctk.CTkLabel(main, text="Combat Log", font=ctk.CTkFont(weight="bold"))
+        log_label = ctk.CTkLabel(main, text="战斗日志", font=ctk.CTkFont(weight="bold"))
         log_label.grid(row=1, column=0, padx=20, pady=(6, 4), sticky="w")
 
         self.log_box = ctk.CTkTextbox(main, font=("Consolas", 12), state="disabled")
@@ -215,7 +222,7 @@ class PPMonkApp(ctk.CTk):
         ap_frame.grid(row=3, column=0, padx=20, pady=(4, 20), sticky="ew")
         ap_frame.grid_columnconfigure(1, weight=1)
 
-        ap_label = ctk.CTkLabel(ap_frame, text="Total AP", font=ctk.CTkFont(size=18, weight="bold"))
+        ap_label = ctk.CTkLabel(ap_frame, text="总AP", font=ctk.CTkFont(size=18, weight="bold"))
         ap_label.grid(row=0, column=0, padx=10, pady=12, sticky="w")
 
         self.ap_value_label = ctk.CTkLabel(ap_frame, textvariable=self.total_ap_var, font=ctk.CTkFont(size=26, weight="bold"))
@@ -234,17 +241,23 @@ class PPMonkApp(ctk.CTk):
             timeline_window.focus()
 
     def _open_sandbox(self):
-        # [Task 1 & 7] Pass active talents
-        sandbox = SandboxWindow(self, active_talents=self.active_talents_list)
-        # Maybe pass current target count default too? Sandbox has its own control.
-        # But setting initial value would be nice.
+        # Gather current stats for sandbox default
+        stats = {
+            'agility': 2000, # Default, UI doesn't have agility slider
+            'crit_rating': _crit_percent_to_rating(self.stat_vars["Crit"].get()),
+            'haste_rating': _haste_percent_to_rating(self.stat_vars["Haste"].get()),
+            'mastery_rating': _mastery_percent_to_rating(self.stat_vars["Mastery"].get()),
+            'vers_rating': _vers_percent_to_rating(self.stat_vars["Versatility"].get()),
+        }
+
+        sandbox = SandboxWindow(self, active_talents=self.active_talents_list, player_stats=stats)
         sandbox.target_count.set(self.target_count_var.get())
-        sandbox._reset_sandbox() # Force reset with new values if needed
+        sandbox._reset_sandbox()
         sandbox.focus()
 
     def _on_talents_updated(self, talent_list):
         self.active_talents_list = talent_list
-        self.talent_summary_label.configure(text=f"Selected: {len(talent_list)} nodes")
+        self.talent_summary_label.configure(text=f"已选: {len(talent_list)} 天赋")
         print(f"UI Updated Talents: {self.active_talents_list}")
 
     def _update_stat_entry(self, name):
@@ -282,7 +295,7 @@ class PPMonkApp(ctk.CTk):
             return
         self.running = True
         self.total_ap_var.set("--")
-        self.status_var.set("Training...")
+        self.status_var.set("训练中...")
         self.progress.configure(mode="determinate")
         self.progress.set(0)
         self.start_btn.configure(state="disabled")
@@ -305,7 +318,7 @@ class PPMonkApp(ctk.CTk):
             "crit_rating": _crit_percent_to_rating(stats["Crit"]),
             "mastery_rating": _mastery_percent_to_rating(stats["Mastery"]),
             "vers_rating": _vers_percent_to_rating(stats["Versatility"]),
-            "target_count": target_count # [Task 7]
+            "target_count": target_count
         }
 
         thread = threading.Thread(
@@ -317,7 +330,7 @@ class PPMonkApp(ctk.CTk):
 
     def _stop_simulation(self):
         if self.running:
-            self.status_var.set("Stopping...")
+            self.status_var.set("停止中...")
             self.stop_btn.configure(state="disabled")
             self.stop_event.set()
 
@@ -333,7 +346,7 @@ class PPMonkApp(ctk.CTk):
             )
             self.log_queue.put(("result", result))
         finally:
-            self.log_queue.put(("status", {"text": "Ready", "stop": True}))
+            self.log_queue.put(("status", {"text": "就绪", "stop": True}))
 
     def _enqueue_log(self, message):
         self.log_queue.put(("log", message))
@@ -364,7 +377,7 @@ class PPMonkApp(ctk.CTk):
                     if payload.get("timeline_data"):
                         self.last_timeline_data = payload["timeline_data"]
                         self.timeline_btn.configure(state="normal")
-                        self._append_log("Timeline data ready.")
+                        self._append_log("时间轴数据已就绪。")
         self.after(100, self._process_log_queue)
 
 

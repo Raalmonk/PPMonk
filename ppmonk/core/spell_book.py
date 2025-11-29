@@ -85,7 +85,7 @@ class Spell:
         if player.chi < cost: return False
         return True
 
-    def cast(self, player, other_spells=None, damage_meter=None, force_proc_glory=False, force_proc_reset=False, use_expected_value=False):
+    def cast(self, player, other_spells=None, damage_meter=None, force_proc_glory=False, force_proc_reset=False, force_proc_combo_breaker=False, use_expected_value=False):
         player.energy -= self.energy_cost
 
         actual_chi_cost = self.chi_cost
@@ -148,7 +148,12 @@ class Spell:
         # TP Procs
         if self.abbr == 'TP' and getattr(player, 'has_combo_breaker', False):
             chance = 0.10 if getattr(player, 'has_memory_of_monastery', False) else 0.08
-            if random.random() < chance:
+            should_proc_cb = force_proc_combo_breaker
+
+            if not should_proc_cb and not use_expected_value and random.random() < chance:
+                should_proc_cb = True
+
+            if should_proc_cb:
                 player.combo_breaker_stacks = min(2, player.combo_breaker_stacks + 1)
 
         if self.chi_cost > 0 and getattr(player, 'has_dance_of_chiji', False):

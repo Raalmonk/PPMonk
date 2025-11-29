@@ -47,13 +47,13 @@ class DraggableBlock:
 class SandboxWindow(ctk.CTkToplevel):
     def __init__(self, parent, active_talents=None, player_stats=None):
         super().__init__(parent)
-        self.title("Sequence Editor")
+        self.title("手动沙盒 (Sequence Editor)")
         self.geometry("1400x850")
 
         self.active_talents = active_talents if active_talents else []
         self.player_stats = player_stats if player_stats else {}
 
-        # [Fix] Initialize target_count so ui.py doesn't crash when setting it
+        # Initialize target_count
         self.target_count = ctk.IntVar(value=1)
 
         # Core Data Structure
@@ -75,8 +75,6 @@ class SandboxWindow(ctk.CTkToplevel):
         self._recalculate_timeline()
 
     def _init_spellbook(self):
-        # We need a reference spellbook just to get spell names/costs for the palette
-        # The actual simulation uses a fresh one each time.
         self.ref_player = PlayerState() # Dummy
         self.ref_spell_book = SpellBook(active_talents=self.active_talents)
         self.ref_spell_book.apply_talents(self.ref_player)
@@ -86,12 +84,54 @@ class SandboxWindow(ctk.CTkToplevel):
         top_panel = ctk.CTkFrame(self)
         top_panel.pack(fill="x", padx=10, pady=5)
 
-        ctk.CTkButton(top_panel, text="Clear Sequence", fg_color="#C0392B", command=self._clear_sequence).pack(side="left", padx=5)
-        ctk.CTkButton(top_panel, text="Export JSON", command=self._export_json).pack(side="left", padx=5)
-        ctk.CTkButton(top_panel, text="Import JSON", command=self._import_json).pack(side="left", padx=5)
+        ctk.CTkButton(top_panel, text="清空序列", fg_color="#C0392B", command=self._clear_sequence).pack(side="left", padx=5)
+        ctk.CTkButton(top_panel, text="导出 JSON", command=self._export_json).pack(side="left", padx=5)
+        ctk.CTkButton(top_panel, text="导入 JSON", command=self._import_json).pack(side="left", padx=5)
 
-        self.stats_label = ctk.CTkLabel(top_panel, text="Total DMG: 0 | DPS: 0", font=("Arial", 14, "bold"))
+        self.stats_label = ctk.CTkLabel(top_panel, text="总伤害: 0 | DPS: 0", font=("Arial", 14, "bold"))
         self.stats_label.pack(side="right", padx=20)
+
+        # --- Task 3: Stat Editors ---
+        stats_frame = ctk.CTkFrame(self)
+        stats_frame.pack(fill="x", padx=10, pady=5)
+
+        # We need Agile, Crit, Haste, Mastery, Vers
+        # Input fields. We use player_stats as default.
+
+        self.stat_inputs = {}
+        stat_defs = [
+            ("agility", "敏捷", 2000),
+            ("crit_rating", "暴击", 2000),
+            ("haste_rating", "急速", 1500),
+            ("mastery_rating", "精通", 1000),
+            ("vers_rating", "全能", 500)
+        ]
+
+        for key, label, default in stat_defs:
+            val = self.player_stats.get(key, default)
+
+            f = ctk.CTkFrame(stats_frame, fg_color="transparent")
+            f.pack(side="left", padx=10)
+
+            ctk.CTkLabel(f, text=label).pack(side="left", padx=2)
+
+            var = ctk.StringVar(value=str(int(val)))
+            entry = ctk.CTkEntry(f, width=60, textvariable=var)
+            entry.pack(side="left", padx=2)
+            entry.bind("<Return>", lambda e: self._recalculate_timeline())
+            entry.bind("<FocusOut>", lambda e: self._recalculate_timeline())
+
+            self.stat_inputs[key] = var
+
+        # Target Count in Sandbox
+        f_target = ctk.CTkFrame(stats_frame, fg_color="transparent")
+        f_target.pack(side="left", padx=10)
+        ctk.CTkLabel(f_target, text="目标数").pack(side="left", padx=2)
+        target_entry = ctk.CTkEntry(f_target, width=40, textvariable=self.target_count)
+        target_entry.pack(side="left", padx=2)
+        target_entry.bind("<Return>", lambda e: self._recalculate_timeline())
+        target_entry.bind("<FocusOut>", lambda e: self._recalculate_timeline())
+
 
         # --- Main Content ---
         content = ctk.CTkFrame(self)
@@ -101,7 +141,7 @@ class SandboxWindow(ctk.CTkToplevel):
         palette_frame = ctk.CTkFrame(content, width=200)
         palette_frame.pack(side="left", fill="y", padx=5, pady=5)
 
-        ctk.CTkLabel(palette_frame, text="Spell Palette", font=("Arial", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(palette_frame, text="技能面板 (Palette)", font=("Arial", 16, "bold")).pack(pady=10)
         self.palette_scroll = ctk.CTkScrollableFrame(palette_frame)
         self.palette_scroll.pack(fill="both", expand=True)
 
@@ -111,7 +151,7 @@ class SandboxWindow(ctk.CTkToplevel):
         seq_frame = ctk.CTkFrame(content)
         seq_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-        ctk.CTkLabel(seq_frame, text="Action Sequence (Drag to Reorder, Right-Click to Delete)", font=("Arial", 14)).pack(pady=5)
+        ctk.CTkLabel(seq_frame, text="动作序列 (拖拽排序, 右键删除)", font=("Arial", 14)).pack(pady=5)
 
         self.canvas_container = ctk.CTkFrame(seq_frame)
         self.canvas_container.pack(fill="both", expand=True)
@@ -126,7 +166,7 @@ class SandboxWindow(ctk.CTkToplevel):
         # Info Box
         self.info_box = ctk.CTkTextbox(seq_frame, height=150)
         self.info_box.pack(fill="x", pady=5)
-        self.info_box.insert("1.0", "Click a block to see details...")
+        self.info_box.insert("1.0", "点击方块查看详情...")
         self.info_box.configure(state="disabled")
 
     def _populate_palette(self):
@@ -134,15 +174,18 @@ class SandboxWindow(ctk.CTkToplevel):
         spell_keys = ["TP", "BOK", "RSK", "FOF", "WDP", "SCK", "SOTWL", "SW", "Xuen", "Zenith", "ToD", "Conduit"]
 
         for key in spell_keys:
-            # Check if known? For now, we show all, simulation will validation error them if unknown.
-            if key in self.ref_spell_book.spells: # Only show spells in book (talents applied)
+            if key in self.ref_spell_book.spells:
                  if self.ref_spell_book.spells[key].is_known:
                      btn = ctk.CTkButton(self.palette_scroll, text=self.ref_spell_book.spells[key].name,
                                          command=lambda k=key: self._add_to_sequence(k))
                      btn.pack(pady=2, padx=5, fill="x")
 
-        ctk.CTkLabel(self.palette_scroll, text="Controls").pack(pady=10)
-        ctk.CTkButton(self.palette_scroll, text="Wait 0.5s", fg_color="gray", command=lambda: self._add_to_sequence("WAIT_0_5")).pack(pady=2, padx=5, fill="x")
+        ctk.CTkLabel(self.palette_scroll, text="控制 & 触发").pack(pady=10)
+        ctk.CTkButton(self.palette_scroll, text="等待 0.5s", fg_color="gray", command=lambda: self._add_to_sequence("WAIT_0_5")).pack(pady=2, padx=5, fill="x")
+
+        # Task 7: Trigger Buttons
+        ctk.CTkButton(self.palette_scroll, text="触发 RSK 重置", fg_color="#D35400", command=lambda: self._add_to_sequence("CMD_RESET_RSK")).pack(pady=2, padx=5, fill="x")
+        ctk.CTkButton(self.palette_scroll, text="触发 免费 BOK", fg_color="#D35400", command=lambda: self._add_to_sequence("CMD_COMBO_BREAKER")).pack(pady=2, padx=5, fill="x")
 
     def _add_to_sequence(self, spell_key):
         item = {
@@ -172,6 +215,25 @@ class SandboxWindow(ctk.CTkToplevel):
             res = data['sim_result']
             text += f"Damage: {int(res['damage'])}\n"
             text += f"Time: {res['timestamp']:.2f}s\n"
+
+            # Task 4: FOF Aggregation
+            if data['name'] == 'FOF':
+                total_fof_dmg = res['damage']
+
+                # The user wants "Total Integrated" and "Details Separated".
+                # res['damage'] is the integrated total.
+                text += f"\n总伤害 (整合): {int(total_fof_dmg)}\n"
+                text += "详细跳数 (分开):\n"
+
+                # Display breakdown
+                if 'breakdown' in res:
+                    bd = res['breakdown']
+                    if 'raw_base' in bd:
+                        text += f"  Channel Dmg: {int(bd.get('total_dmg_after_aoe', 0))}\n"
+                    if 'extra_events' in bd:
+                        for evt in bd['extra_events']:
+                            text += f"  {evt['name']}: {int(evt['damage'])}\n"
+
             if 'breakdown' in res:
                 bd = res['breakdown']
                 text += f"\nBreakdown:\n"
@@ -226,25 +288,44 @@ class SandboxWindow(ctk.CTkToplevel):
             except Exception as e:
                 print(f"Import failed: {e}")
 
+    def _reset_sandbox(self):
+        # Helper to force UI update if inputs changed externally (not really used now since we read inputs in _recalculate)
+        self._recalculate_timeline()
+
     def _recalculate_timeline(self):
-        # 1. Reset Simulation
+        # 1. Reset Simulation with Stats from Inputs
+        try:
+            agi = float(self.stat_inputs['agility'].get())
+            crit = float(self.stat_inputs['crit_rating'].get())
+            haste = float(self.stat_inputs['haste_rating'].get())
+            mastery = float(self.stat_inputs['mastery_rating'].get())
+            vers = float(self.stat_inputs['vers_rating'].get())
+        except ValueError:
+            agi, crit, haste, mastery, vers = 2000, 2000, 1500, 1000, 500
+
         self.sim_player = PlayerState(
-            agility=self.player_stats.get('agility', 2000),
-            rating_crit=self.player_stats.get('crit_rating', 2000),
-            rating_haste=self.player_stats.get('haste_rating', 1500),
-            rating_mastery=self.player_stats.get('mastery_rating', 1000),
-            rating_vers=self.player_stats.get('vers_rating', 500)
+            agility=agi,
+            rating_crit=crit,
+            rating_haste=haste,
+            rating_mastery=mastery,
+            rating_vers=vers
         )
+        self.sim_player.target_count = self.target_count.get()
+
         self.sim_spell_book = SpellBook(active_talents=self.active_talents)
         self.sim_spell_book.apply_talents(self.sim_player)
 
         time_elapsed = 0.0
         total_damage = 0.0
 
+        # Flags for triggers
+        next_cast_force_reset = False
+        next_cast_force_cb = False
+
         # 2. Iterate Sequence
         for item in self.action_sequence:
             name = item['name']
-            item.pop('error', None) # Clear previous errors
+            item.pop('error', None)
             item.pop('sim_result', None)
 
             if name == "WAIT_0_5":
@@ -252,6 +333,17 @@ class SandboxWindow(ctk.CTkToplevel):
                 self.sim_spell_book.tick(0.5)
                 time_elapsed += 0.5
                 item['sim_result'] = {'damage': 0, 'timestamp': time_elapsed, 'breakdown': 'Wait 0.5s'}
+                continue
+
+            # Task 7: Trigger Logic
+            if name == "CMD_RESET_RSK":
+                next_cast_force_reset = True
+                item['sim_result'] = {'damage': 0, 'timestamp': time_elapsed, 'breakdown': 'Instruction: Force RSK Reset'}
+                continue
+
+            if name == "CMD_COMBO_BREAKER":
+                next_cast_force_cb = True
+                item['sim_result'] = {'damage': 0, 'timestamp': time_elapsed, 'breakdown': 'Instruction: Force Combo Breaker'}
                 continue
 
             if name not in self.sim_spell_book.spells:
@@ -263,33 +355,54 @@ class SandboxWindow(ctk.CTkToplevel):
             # Check usability
             if not spell.is_usable(self.sim_player, self.sim_spell_book.spells):
                 item['error'] = "Not Ready / No Resources"
-                # Visualization: Red block, no cast
                 continue
 
-            # Cast
-            dmg, breakdown = spell.cast(self.sim_player, other_spells=self.sim_spell_book.spells, use_expected_value=True)
+            # Cast with flags
+            dmg, breakdown = spell.cast(
+                self.sim_player,
+                other_spells=self.sim_spell_book.spells,
+                use_expected_value=True,
+                force_proc_reset=next_cast_force_reset,
+                force_proc_combo_breaker=next_cast_force_cb
+            )
+
+            # Reset flags
+            next_cast_force_reset = False
+            next_cast_force_cb = False
+
             total_damage += dmg
 
             # Advance Time
             cast_time = max(self.sim_player.gcd_remaining, spell.get_effective_cast_time(self.sim_player))
-            # Advance logic
             pdmg, events = self.sim_player.advance_time(cast_time, use_expected_value=True)
             self.sim_spell_book.tick(cast_time)
 
             time_elapsed += cast_time
-            # Add passive damage
+
+            # [Fix Task 4] Merge advance_time events (ticks) into breakdown['extra_events']
+            if 'extra_events' not in breakdown:
+                breakdown['extra_events'] = []
+
             for evt in events:
-                total_damage += evt.get('Expected DMG', 0)
+                dmg_val = evt.get('Expected DMG', 0)
+                total_damage += dmg_val
+                breakdown['extra_events'].append({
+                     'name': evt.get('source', 'Tick/Event'),
+                     'damage': dmg_val
+                })
 
             item['sim_result'] = {
-                'damage': dmg,
+                'damage': dmg, # Spell.cast returns total_damage (base + extra)
                 'timestamp': time_elapsed,
                 'breakdown': breakdown
             }
+            # Note: total_damage in loop includes dmg from cast (which includes extra_events inside cast)
+            # AND evt['Expected DMG'] from advance_time.
+            # So `total_damage` variable tracks sequence total correctly.
 
         # 3. Update Stats
         dps = total_damage / time_elapsed if time_elapsed > 0 else 0
-        self.stats_label.configure(text=f"Total DMG: {int(total_damage):,} | DPS: {int(dps):,}")
+        self.stats_label.configure(text=f"总伤害: {int(total_damage):,} | DPS: {int(dps):,}")
 
         # 4. Redraw
         self._draw_sequence()
@@ -309,6 +422,9 @@ class SandboxWindow(ctk.CTkToplevel):
                 text += "\n(!)"
             elif item['name'] == "WAIT_0_5":
                 color = "#555555"
+            elif item['name'].startswith("CMD_"):
+                color = "#D35400"
+                text = text.replace("CMD_", "")
 
             # Create Block
             rect_id = self.canvas.create_rectangle(x, self.lane_y, x + self.block_width, self.lane_y + self.block_height, fill=color, outline=outline, width=2)
@@ -324,7 +440,7 @@ class SandboxWindow(ctk.CTkToplevel):
             self.block_map[tag] = item
 
             # Info text below (Time, DMG)
-            if 'sim_result' in item and 'error' not in item:
+            if 'sim_result' in item and 'error' not in item and not item['name'].startswith("CMD_"):
                 res = item['sim_result']
                 self.canvas.create_text(x + self.block_width/2, self.lane_y + self.block_height + 15, text=f"{int(res['damage']/1000)}k", fill="#A9DFBF", font=("Arial", 9))
                 self.canvas.create_text(x + self.block_width/2, self.lane_y - 15, text=f"{res['timestamp']:.1f}s", fill="#BDC3C7", font=("Arial", 9))
