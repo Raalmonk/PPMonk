@@ -2,44 +2,8 @@ import customtkinter as ctk
 import tkinter as tk
 import json
 import random
-import os
-from PIL import Image, ImageTk
-
 from ppmonk.core.player import PlayerState
 from ppmonk.core.spell_book import SpellBook
-
-# --- Localization & Config ---
-
-SPELL_LOCALIZATION = {
-    'TP': '猛虎掌 (Tiger Palm)',
-    'BOK': '幻灭踢 (Blackout Kick)',
-    'RSK': '旭日东升踢 (Rising Sun Kick)',
-    'FOF': '怒雷破 (Fists of Fury)',
-    'SCK': '神鹤引项踢 (Spinning Crane Kick)',
-    'WDP': '升龙霸 (Whirling Dragon Punch)',
-    'SOTWL': '风击 (Strike of the Windlord)',
-    'SW': '碧玉疾风 (Slicing Winds)',
-    'Xuen': '召唤白虎 (Invoke Xuen)',
-    'Zenith': '升腾 (Zenith)',
-    'ToD': '轮回之触 (Touch of Death)',
-    'Conduit': '天神御身 (Celestial Conduit)',
-    'WAIT_0_5': '等待 0.5s',
-    'CMD_RESET_RSK': '指令: 重置 RSK',
-    'CMD_COMBO_BREAKER': '指令: 免费幻灭踢'
-}
-
-SPELL_GROUPS = [
-    ("爆发技能 (Major Cooldowns)", ["Zenith", "Xuen", "Conduit", "ToD"]),
-    ("小爆发 (Minor Cooldowns)", ["SOTWL", "WDP", "SW"]),
-    ("主要填充 (Major Fillers)", ["FOF", "RSK"]),
-    ("基础技能 (Basic Fillers)", ["SCK", "TP", "BOK"]),
-    ("控制 & 指令 (Control)", ["WAIT_0_5", "CMD_RESET_RSK", "CMD_COMBO_BREAKER"])
-]
-
-ICON_SIZE_PALETTE = 32
-ICON_SIZE_TIMELINE = 48
-ROW_HEIGHT = 80
-HEADER_WIDTH = 200
 
 class DraggableBlock:
     def __init__(self, canvas, item_id, data, on_click, on_drag_end, on_right_click):
@@ -84,7 +48,7 @@ class SandboxWindow(ctk.CTkToplevel):
     def __init__(self, parent, active_talents=None, player_stats=None):
         super().__init__(parent)
         self.title("手动沙盒 (Sequence Editor)")
-        self.geometry("1400x900")
+        self.geometry("1400x850")
 
         self.active_talents = active_talents if active_talents else []
         self.player_stats = player_stats if player_stats else {}
@@ -98,53 +62,17 @@ class SandboxWindow(ctk.CTkToplevel):
         # Temporary State for Simulation
         self.sim_player = None
         self.sim_spell_book = None
-        self.icon_cache = {}
 
         # UI Constants
         self.block_width = 80
-        self.block_height = 60
+        self.block_height = 50
         self.block_gap = 5
+        self.lane_y = 100
         self.block_map = {}
 
-        self._load_icons()
         self._init_spellbook()
         self._build_ui()
         self._recalculate_timeline()
-
-    def _load_icons(self):
-        # Mapping from spell abbr to filename (copied/adapted from timeline_view.py)
-        icon_map = {
-            'RSK': 'ability_monk_risingsunkick.jpg',
-            'FOF': 'monk_ability_fistoffury.jpg',
-            'SCK': 'ability_monk_cranekick_new.jpg',
-            'TP': 'ability_monk_tigerpalm.jpg',
-            'WDP': 'ability_monk_hurricanestrike.jpg',
-            'SOTWL': 'inv_hand_1h_artifactskywall_d_01.jpg',
-            'Zenith': 'spell_nature_giftofthewild.jpg',
-            'Xuen': 'ability_monk_summontigerstatue.jpg',
-            'BOK': 'ability_monk_roundhousekick.jpg',
-            'SW': 'ability_skyreach_wind_wall.jpg',
-            'ToD': 'ability_monk_touchofdeath.jpg',
-            'Conduit': 'inv_ability_conduitofthecelestialsmonk_celestialconduit.jpg'
-        }
-
-        # Use relative path from this file location for safety
-        assets_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'abilityIcons')
-        assets_path = os.path.normpath(assets_path)
-
-        for key, filename in icon_map.items():
-            full_path = os.path.join(assets_path, filename)
-            if os.path.exists(full_path):
-                try:
-                    # Load and resize for Palette
-                    img = Image.open(full_path)
-                    self.icon_cache[f"{key}_palette"] = ctk.CTkImage(light_image=img, dark_image=img, size=(ICON_SIZE_PALETTE, ICON_SIZE_PALETTE))
-
-                    # Load and resize for Timeline (Canvas uses ImageTk)
-                    img_tm = img.resize((ICON_SIZE_TIMELINE, ICON_SIZE_TIMELINE), Image.Resampling.LANCZOS)
-                    self.icon_cache[f"{key}_timeline"] = ImageTk.PhotoImage(img_tm)
-                except Exception as e:
-                    print(f"Error loading icon {key}: {e}")
 
     def _init_spellbook(self):
         self.ref_player = PlayerState() # Dummy
@@ -156,20 +84,19 @@ class SandboxWindow(ctk.CTkToplevel):
         top_panel = ctk.CTkFrame(self)
         top_panel.pack(fill="x", padx=10, pady=5)
 
-        ctk.CTkButton(top_panel, text="清空序列 (Clear)", fg_color="#C0392B", command=self._clear_sequence).pack(side="left", padx=5)
+        ctk.CTkButton(top_panel, text="清空序列", fg_color="#C0392B", command=self._clear_sequence).pack(side="left", padx=5)
         ctk.CTkButton(top_panel, text="导出 JSON", command=self._export_json).pack(side="left", padx=5)
         ctk.CTkButton(top_panel, text="导入 JSON", command=self._import_json).pack(side="left", padx=5)
-
-        # Resource Display (Task: Energy / Chi)
-        self.resource_label = ctk.CTkLabel(top_panel, text="预计结束资源: Energy 0 | Chi 0", font=("Arial", 12, "bold"), text_color="#F1C40F")
-        self.resource_label.pack(side="left", padx=20)
 
         self.stats_label = ctk.CTkLabel(top_panel, text="总伤害: 0 | DPS: 0", font=("Arial", 14, "bold"))
         self.stats_label.pack(side="right", padx=20)
 
-        # --- Stat Editors ---
+        # --- Task 3: Stat Editors ---
         stats_frame = ctk.CTkFrame(self)
         stats_frame.pack(fill="x", padx=10, pady=5)
+
+        # We need Agile, Crit, Haste, Mastery, Vers
+        # Input fields. We use player_stats as default.
 
         self.stat_inputs = {}
         stat_defs = [
@@ -205,16 +132,17 @@ class SandboxWindow(ctk.CTkToplevel):
         target_entry.bind("<Return>", lambda e: self._recalculate_timeline())
         target_entry.bind("<FocusOut>", lambda e: self._recalculate_timeline())
 
+
         # --- Main Content ---
         content = ctk.CTkFrame(self)
         content.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Left: Spell Palette (Categorized)
-        palette_frame = ctk.CTkFrame(content, width=280)
+        # Left: Spell Palette
+        palette_frame = ctk.CTkFrame(content, width=200)
         palette_frame.pack(side="left", fill="y", padx=5, pady=5)
 
         ctk.CTkLabel(palette_frame, text="技能面板 (Palette)", font=("Arial", 16, "bold")).pack(pady=10)
-        self.palette_scroll = ctk.CTkScrollableFrame(palette_frame, width=260)
+        self.palette_scroll = ctk.CTkScrollableFrame(palette_frame)
         self.palette_scroll.pack(fill="both", expand=True)
 
         self._populate_palette()
@@ -229,16 +157,10 @@ class SandboxWindow(ctk.CTkToplevel):
         self.canvas_container.pack(fill="both", expand=True)
 
         h_scroll = tk.Scrollbar(self.canvas_container, orient="horizontal")
-        v_scroll = tk.Scrollbar(self.canvas_container, orient="vertical") # Added Vertical Scroll
-
-        self.canvas = tk.Canvas(self.canvas_container, bg="#2B2B2B", height=400,
-                                xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set)
-
+        self.canvas = tk.Canvas(self.canvas_container, bg="#2B2B2B", height=400, xscrollcommand=h_scroll.set)
         h_scroll.config(command=self.canvas.xview)
-        v_scroll.config(command=self.canvas.yview)
 
         h_scroll.pack(side="bottom", fill="x")
-        v_scroll.pack(side="right", fill="y")
         self.canvas.pack(side="top", fill="both", expand=True)
 
         # Info Box
@@ -248,32 +170,22 @@ class SandboxWindow(ctk.CTkToplevel):
         self.info_box.configure(state="disabled")
 
     def _populate_palette(self):
-        for group_name, spell_keys in SPELL_GROUPS:
-            # Header
-            ctk.CTkLabel(self.palette_scroll, text=group_name, font=("Arial", 12, "bold"), text_color="#bdc3c7").pack(pady=(10, 2), anchor="w")
+        # Add buttons for spells
+        spell_keys = ["TP", "BOK", "RSK", "FOF", "WDP", "SCK", "SOTWL", "SW", "Xuen", "Zenith", "ToD", "Conduit"]
 
-            # Grid container for buttons (optional, but packing is easier for now)
-            # Using pack for simplicity
-            for key in spell_keys:
-                if key.startswith("CMD_") or key == "WAIT_0_5":
-                    # Commands
-                    display_name = SPELL_LOCALIZATION.get(key, key)
-                    btn = ctk.CTkButton(self.palette_scroll, text=display_name, fg_color="#555555",
-                                        command=lambda k=key: self._add_to_sequence(k))
-                    btn.pack(pady=2, padx=5, fill="x")
-                elif key in self.ref_spell_book.spells:
-                     spell = self.ref_spell_book.spells[key]
-                     if spell.is_known:
-                         display_name = SPELL_LOCALIZATION.get(key, spell.name)
-                         icon = self.icon_cache.get(f"{key}_palette", None)
+        for key in spell_keys:
+            if key in self.ref_spell_book.spells:
+                 if self.ref_spell_book.spells[key].is_known:
+                     btn = ctk.CTkButton(self.palette_scroll, text=self.ref_spell_book.spells[key].name,
+                                         command=lambda k=key: self._add_to_sequence(k))
+                     btn.pack(pady=2, padx=5, fill="x")
 
-                         btn = ctk.CTkButton(self.palette_scroll,
-                                             text=f" {display_name}",
-                                             image=icon,
-                                             compound="left",
-                                             anchor="w",
-                                             command=lambda k=key: self._add_to_sequence(k))
-                         btn.pack(pady=2, padx=5, fill="x")
+        ctk.CTkLabel(self.palette_scroll, text="控制 & 触发").pack(pady=10)
+        ctk.CTkButton(self.palette_scroll, text="等待 0.5s", fg_color="gray", command=lambda: self._add_to_sequence("WAIT_0_5")).pack(pady=2, padx=5, fill="x")
+
+        # Task 7: Trigger Buttons
+        ctk.CTkButton(self.palette_scroll, text="触发 RSK 重置", fg_color="#D35400", command=lambda: self._add_to_sequence("CMD_RESET_RSK")).pack(pady=2, padx=5, fill="x")
+        ctk.CTkButton(self.palette_scroll, text="触发 免费 BOK", fg_color="#D35400", command=lambda: self._add_to_sequence("CMD_COMBO_BREAKER")).pack(pady=2, padx=5, fill="x")
 
     def _add_to_sequence(self, spell_key):
         item = {
@@ -295,8 +207,7 @@ class SandboxWindow(ctk.CTkToplevel):
 
     def _on_block_click(self, data):
         # Show details in info box
-        display_name = SPELL_LOCALIZATION.get(data['name'], data['name'])
-        text = f"Action: {display_name}\n"
+        text = f"Action: {data['name']}\n"
         if 'error' in data:
             text += f"ERROR: {data['error']}\n"
 
@@ -305,10 +216,16 @@ class SandboxWindow(ctk.CTkToplevel):
             text += f"Damage: {int(res['damage'])}\n"
             text += f"Time: {res['timestamp']:.2f}s\n"
 
+            # Task 4: FOF Aggregation
             if data['name'] == 'FOF':
                 total_fof_dmg = res['damage']
+
+                # The user wants "Total Integrated" and "Details Separated".
+                # res['damage'] is the integrated total.
                 text += f"\n总伤害 (整合): {int(total_fof_dmg)}\n"
                 text += "详细跳数 (分开):\n"
+
+                # Display breakdown
                 if 'breakdown' in res:
                     bd = res['breakdown']
                     if 'raw_base' in bd:
@@ -334,25 +251,11 @@ class SandboxWindow(ctk.CTkToplevel):
         self.info_box.configure(state="disabled")
 
     def _on_drag_end(self, item_id, final_x):
-        # Determine index based on block width, ignoring Y (since sequence is strictly linear in time, but displayed across rows)
-        # Wait, if we split into rows, dragging horizontally is ambiguous if blocks are not on the same row.
-        # But for 'Sandbox', it's a sequence editor. The 'Timeline' view shows rows.
-        # The user request "Timeline and Skill bar must be separate" implies the VISUALIZATION should be separated by groups.
-        # BUT this is an editor. If we separate rows, does it mean we have parallel execution? No, Monk is GCD locked.
-        # It's still a single sequence.
-        # So we display them in rows corresponding to their group, but the X axis is still 'Step Index'.
-
         # Calculate new index based on x
-        # Since we spread blocks across rows but they share the same X grid (Step 1, Step 2...),
-        # we can just use the X coordinate to determine the index in the linear sequence.
-
         scroll_x = self.canvas.canvasx(final_x)
-        # Offset by header width
-        effective_x = scroll_x - HEADER_WIDTH
-        if effective_x < 0: effective_x = 0
+        new_index = int(scroll_x // (self.block_width + self.block_gap))
 
-        new_index = int(effective_x // (self.block_width + self.block_gap))
-
+        # Find the data object corresponding to this visual block
         target_data = self.block_map.get(item_id)
 
         if target_data and target_data in self.action_sequence:
@@ -385,6 +288,10 @@ class SandboxWindow(ctk.CTkToplevel):
             except Exception as e:
                 print(f"Import failed: {e}")
 
+    def _reset_sandbox(self):
+        # Helper to force UI update if inputs changed externally (not really used now since we read inputs in _recalculate)
+        self._recalculate_timeline()
+
     def _recalculate_timeline(self):
         # 1. Reset Simulation with Stats from Inputs
         try:
@@ -411,6 +318,7 @@ class SandboxWindow(ctk.CTkToplevel):
         time_elapsed = 0.0
         total_damage = 0.0
 
+        # Flags for triggers
         next_cast_force_reset = False
         next_cast_force_cb = False
 
@@ -427,6 +335,7 @@ class SandboxWindow(ctk.CTkToplevel):
                 item['sim_result'] = {'damage': 0, 'timestamp': time_elapsed, 'breakdown': 'Wait 0.5s'}
                 continue
 
+            # Task 7: Trigger Logic
             if name == "CMD_RESET_RSK":
                 next_cast_force_reset = True
                 item['sim_result'] = {'damage': 0, 'timestamp': time_elapsed, 'breakdown': 'Instruction: Force RSK Reset'}
@@ -446,7 +355,7 @@ class SandboxWindow(ctk.CTkToplevel):
             # Check usability
             if not spell.is_usable(self.sim_player, self.sim_spell_book.spells):
                 item['error'] = "Not Ready / No Resources"
-                # Continue anyway in sandbox
+                continue
 
             # Cast with flags
             dmg, breakdown = spell.cast(
@@ -457,6 +366,7 @@ class SandboxWindow(ctk.CTkToplevel):
                 force_proc_combo_breaker=next_cast_force_cb
             )
 
+            # Reset flags
             next_cast_force_reset = False
             next_cast_force_cb = False
 
@@ -469,6 +379,7 @@ class SandboxWindow(ctk.CTkToplevel):
 
             time_elapsed += cast_time
 
+            # [Fix Task 4] Merge advance_time events (ticks) into breakdown['extra_events']
             if 'extra_events' not in breakdown:
                 breakdown['extra_events'] = []
 
@@ -481,17 +392,17 @@ class SandboxWindow(ctk.CTkToplevel):
                 })
 
             item['sim_result'] = {
-                'damage': dmg,
+                'damage': dmg, # Spell.cast returns total_damage (base + extra)
                 'timestamp': time_elapsed,
                 'breakdown': breakdown
             }
+            # Note: total_damage in loop includes dmg from cast (which includes extra_events inside cast)
+            # AND evt['Expected DMG'] from advance_time.
+            # So `total_damage` variable tracks sequence total correctly.
 
         # 3. Update Stats
         dps = total_damage / time_elapsed if time_elapsed > 0 else 0
         self.stats_label.configure(text=f"总伤害: {int(total_damage):,} | DPS: {int(dps):,}")
-
-        # Update Resource Label
-        self.resource_label.configure(text=f"预计结束资源: Energy {int(self.sim_player.energy)} | Chi {self.sim_player.chi}")
 
         # 4. Redraw
         self._draw_sequence()
@@ -500,78 +411,40 @@ class SandboxWindow(ctk.CTkToplevel):
         self.canvas.delete("all")
         self.block_map = {} # item_id (tag) -> data
 
-        # 1. Draw Group Headers/Backgrounds
-        for idx, (group_name, _) in enumerate(SPELL_GROUPS):
-            y_start = idx * ROW_HEIGHT
-            # Header Box
-            self.canvas.create_rectangle(0, y_start, HEADER_WIDTH, y_start + ROW_HEIGHT, fill="#2c3e50", outline="#34495e")
-            self.canvas.create_text(10, y_start + ROW_HEIGHT/2, text=group_name, fill="#ecf0f1", anchor="w", width=HEADER_WIDTH-20, font=("Arial", 10, "bold"))
-
-            # Lane Background
-            self.canvas.create_rectangle(HEADER_WIDTH, y_start, 5000, y_start + ROW_HEIGHT, fill="#1a1a1a", outline="#333333")
-
-        # 2. Draw Blocks
-        start_x = HEADER_WIDTH + 10
-
+        x = 10
         for i, item in enumerate(self.action_sequence):
-            name_key = item['name']
-
-            # Determine Row
-            row_idx = 4 # Default to last group (Control)
-            found = False
-            for r_idx, (g_name, g_keys) in enumerate(SPELL_GROUPS):
-                if name_key in g_keys:
-                    row_idx = r_idx
-                    found = True
-                    break
-
-            # Special handling for CMDs if not explicitly in list (though they are in Group 5)
-            if not found and (name_key.startswith("CMD_") or name_key == "WAIT_0_5"):
-                row_idx = 4
-
-            y = row_idx * ROW_HEIGHT + (ROW_HEIGHT - self.block_height) / 2
-            x = start_x + i * (self.block_width + self.block_gap)
-
             color = "#2E86C1"
             outline = "black"
-            text = SPELL_LOCALIZATION.get(name_key, name_key)
-            if name_key.startswith("CMD_"): text = text.replace("指令: ", "")
+            text = item['name']
 
             if 'error' in item:
                 color = "#922B21" # Red
                 text += "\n(!)"
-            elif name_key == "WAIT_0_5":
+            elif item['name'] == "WAIT_0_5":
                 color = "#555555"
-            elif name_key.startswith("CMD_"):
+            elif item['name'].startswith("CMD_"):
                 color = "#D35400"
+                text = text.replace("CMD_", "")
 
-            # Draw Block
-            rect_id = self.canvas.create_rectangle(x, y, x + self.block_width, y + self.block_height, fill=color, outline=outline, width=2)
-
-            icon_img = self.icon_cache.get(f"{name_key}_timeline")
-            if icon_img and not 'error' in item:
-                 self.canvas.create_image(x + self.block_width/2, y + self.block_height/2, image=icon_img, tags=f"item_{item['uuid']}")
-            else:
-                 text_id = self.canvas.create_text(x + self.block_width/2, y + self.block_height/2, text=text, fill="white", font=("Arial", 10, "bold"), width=self.block_width-4)
-                 self.canvas.itemconfig(text_id, tags=f"item_{item['uuid']}")
+            # Create Block
+            rect_id = self.canvas.create_rectangle(x, self.lane_y, x + self.block_width, self.lane_y + self.block_height, fill=color, outline=outline, width=2)
+            text_id = self.canvas.create_text(x + self.block_width/2, self.lane_y + self.block_height/2, text=text, fill="white", font=("Arial", 10, "bold"))
 
             # Bind events via unique tag
             tag = f"item_{item['uuid']}"
             self.canvas.itemconfig(rect_id, tags=tag)
+            self.canvas.itemconfig(text_id, tags=tag)
 
             DraggableBlock(self.canvas, tag, item, self._on_block_click, self._on_drag_end, self._remove_item)
 
             self.block_map[tag] = item
 
-            # Info text (Time, DMG)
+            # Info text below (Time, DMG)
             if 'sim_result' in item and 'error' not in item and not item['name'].startswith("CMD_"):
                 res = item['sim_result']
-                # Draw info BELOW the block as requested
-                self.canvas.create_text(x + self.block_width/2, y + self.block_height + 5, text=f"{int(res['damage']/1000)}k", fill="#A9DFBF", font=("Arial", 9), anchor="n")
-                # Draw index top left
-                self.canvas.create_text(x + 2, y + 2, text=f"{i+1}", fill="#BDC3C7", font=("Arial", 8), anchor="nw")
+                self.canvas.create_text(x + self.block_width/2, self.lane_y + self.block_height + 15, text=f"{int(res['damage']/1000)}k", fill="#A9DFBF", font=("Arial", 9))
+                self.canvas.create_text(x + self.block_width/2, self.lane_y - 15, text=f"{res['timestamp']:.1f}s", fill="#BDC3C7", font=("Arial", 9))
 
-        # Set Scroll Region
-        total_width = start_x + len(self.action_sequence) * (self.block_width + self.block_gap) + 100
-        total_height = len(SPELL_GROUPS) * ROW_HEIGHT
-        self.canvas.configure(scrollregion=(0, 0, total_width, total_height))
+            x += self.block_width + self.block_gap
+
+        self.canvas.configure(scrollregion=(0, 0, x + 100, 400))
