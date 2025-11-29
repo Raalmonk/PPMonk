@@ -4,6 +4,8 @@ import json
 import random
 from ppmonk.core.player import PlayerState
 from ppmonk.core.spell_book import SpellBook
+from ppmonk.core.visualizer import TimelineDataCollector
+from ppmonk.ui.timeline_view import NativeTimelineWindow
 
 class DraggableBlock:
     def __init__(self, canvas, item_id, data, on_click, on_drag_end, on_right_click):
@@ -87,6 +89,9 @@ class SandboxWindow(ctk.CTkToplevel):
         ctk.CTkButton(top_panel, text="清空序列", fg_color="#C0392B", command=self._clear_sequence).pack(side="left", padx=5)
         ctk.CTkButton(top_panel, text="导出 JSON", command=self._export_json).pack(side="left", padx=5)
         ctk.CTkButton(top_panel, text="导入 JSON", command=self._import_json).pack(side="left", padx=5)
+
+        # Task 2: Add Button
+        ctk.CTkButton(top_panel, text="查看详细时间轴", command=self._open_timeline_view).pack(side="left", padx=5)
 
         self.stats_label = ctk.CTkLabel(top_panel, text="总伤害: 0 | DPS: 0", font=("Arial", 14, "bold"))
         self.stats_label.pack(side="right", padx=20)
@@ -219,13 +224,8 @@ class SandboxWindow(ctk.CTkToplevel):
             # Task 4: FOF Aggregation
             if data['name'] == 'FOF':
                 total_fof_dmg = res['damage']
-
-                # The user wants "Total Integrated" and "Details Separated".
-                # res['damage'] is the integrated total.
                 text += f"\n总伤害 (整合): {int(total_fof_dmg)}\n"
                 text += "详细跳数 (分开):\n"
-
-                # Display breakdown
                 if 'breakdown' in res:
                     bd = res['breakdown']
                     if 'raw_base' in bd:
@@ -289,8 +289,44 @@ class SandboxWindow(ctk.CTkToplevel):
                 print(f"Import failed: {e}")
 
     def _reset_sandbox(self):
-        # Helper to force UI update if inputs changed externally (not really used now since we read inputs in _recalculate)
         self._recalculate_timeline()
+
+    def _open_timeline_view(self):
+        collector = TimelineDataCollector()
+        current_time = 0.0
+
+        for item in self.action_sequence:
+             # Skip commands
+             if item['name'].startswith("CMD_"):
+                 continue
+
+             if 'sim_result' not in item:
+                 continue
+
+             res = item['sim_result']
+             end_time = res['timestamp']
+             duration = end_time - current_time
+             start_time = current_time
+             current_time = end_time
+
+             name = item['name']
+             if name == "WAIT_0_5":
+                 continue
+
+             dmg = res['damage']
+
+             # Log the main cast
+             collector.log_cast(start_time, name, duration=duration, damage=dmg, info=res)
+
+             # Log extra events
+             if 'breakdown' in res and 'extra_events' in res['breakdown']:
+                 for evt in res['breakdown']['extra_events']:
+                     evt_name = evt['name']
+                     evt_dmg = evt['damage']
+                     # Log extra events at start_time
+                     collector.log_cast(start_time, evt_name, duration=0.5, damage=evt_dmg, info={'Damage': evt_dmg, 'Breakdown': 'Extra Event'})
+
+        NativeTimelineWindow(self, collector.get_data())
 
     def _recalculate_timeline(self):
         # 1. Reset Simulation with Stats from Inputs
@@ -373,7 +409,12 @@ class SandboxWindow(ctk.CTkToplevel):
             total_damage += dmg
 
             # Advance Time
-            cast_time = max(self.sim_player.gcd_remaining, spell.get_effective_cast_time(self.sim_player))
+            if name == 'Zenith':
+                 # Task 4: Zenith does not advance timeline significantly (acts as off-GCD)
+                 cast_time = 0.0
+            else:
+                 cast_time = max(self.sim_player.gcd_remaining, spell.get_effective_cast_time(self.sim_player))
+
             pdmg, events = self.sim_player.advance_time(cast_time, use_expected_value=True)
             self.sim_spell_book.tick(cast_time)
 
@@ -396,9 +437,6 @@ class SandboxWindow(ctk.CTkToplevel):
                 'timestamp': time_elapsed,
                 'breakdown': breakdown
             }
-            # Note: total_damage in loop includes dmg from cast (which includes extra_events inside cast)
-            # AND evt['Expected DMG'] from advance_time.
-            # So `total_damage` variable tracks sequence total correctly.
 
         # 3. Update Stats
         dps = total_damage / time_elapsed if time_elapsed > 0 else 0

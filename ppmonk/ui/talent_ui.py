@@ -221,6 +221,7 @@ class TalentTreeWindow(ctk.CTkToplevel):
         self.info_label = ctk.CTkLabel(self.control_panel, text="已投入点数: 0", font=("Arial", 14, "bold"))
         self.info_label.pack(side="left", padx=20, pady=10)
 
+        # Task 4: Translate buttons
         save_btn = ctk.CTkButton(self.control_panel, text="应用 & 关闭", command=self._on_save, fg_color="#1b8f61", width=150)
         save_btn.pack(side="right", padx=20, pady=10)
 

@@ -48,7 +48,7 @@ class PPMonkApp(ctk.CTk):
         self.target_count_var = ctk.IntVar(value=1)
         self.last_timeline_data = None
 
-        # Task 1: Update Default Talents
+        # Task 3: Update Default Talents
         self.active_talents_list = ['1-1', '3-2', '6-4', '5-6', '2-3', '5-2', '4-1', '7-1', '6-3', '10-3', 'hero-sp-choice1', '8-1', '2-1', '10-6', '5-4', '9-1', '5-5', '4-2', '5-3', '7-3', '9-3', '4-3', '2-2', '9-7', 'hero-sp-header', '8-6', '8-4', '10-5', '8-5_b', '9-5', '6-2_b', '3-4', '9-4']
 
         self._build_layout()
@@ -78,6 +78,7 @@ class PPMonkApp(ctk.CTk):
             "Versatility": ctk.DoubleVar(value=10.0),
         }
 
+        # Task 3: Translate UI Strings
         stat_labels_zh = {
             "Haste": "急速",
             "Crit": "暴击",
