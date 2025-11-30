@@ -1,3 +1,215 @@
+import random
+
+class PlayerState:
+    def __init__(self, agility=2000.0, rating_crit=2000, rating_haste=1500, rating_mastery=1000, rating_vers=500, weapon_type='dw', max_health=100000.0, target_count=1):
+        self.rating_crit = rating_crit
+        self.rating_haste = rating_haste
+        self.rating_mastery = rating_mastery
+        self.rating_vers = rating_vers
+        self.agility = agility
+
+        self.weapon_type = weapon_type  # '2h' or 'dw'
+        self.attack_power = 1.0  # Base AP Multiplier for transparency
+
+        self.max_health = max_health
+        self.target_health_pct = 1.0
+        self.target_count = max(1, target_count)
+
+        self.base_mastery = 0.19
+        self.base_crit = 0.10
+
+        self.max_energy = 100.0
+        self.energy_regen_mult = 1.0
+        self.energy = 100.0
+
+        self.max_chi = 5
+        self.chi = 2
+
+        # 状态追踪
+        self.xuen_active = False
+        self.xuen_duration = 0.0
+        self.zenith_active = False
+        self.zenith_duration = 0.0
+        self.talent_crit_bonus = 0.0
+        self.combat_wisdom_ready = False
+        self.combat_wisdom_timer = 0.0
+
+        self.momentum_buff_active = False
+        self.momentum_buff_duration = 0.0
+
+        self.last_spell_name = None
+        self.gcd_remaining = 0.0
+        self.is_channeling = False
+        self.current_channel_spell = None
+        self.channel_time_remaining = 0.0
+        self.channel_ticks_remaining = 0
+        self.time_until_next_tick = 0.0
+        self.channel_tick_interval = 0.0
+        self.channel_mastery_snapshot = False
+
+        # 面板属性
+        self.crit = 0.0
+        self.versatility = 0.0
+        self.haste = 0.0
+        self.mastery = 0.0
+
+        # 天赋开关
+        self.has_dual_threat = False
+        self.has_totm = False
+        self.has_glory_of_the_dawn = False
+        self.has_momentum_boost = False
+        self.has_cyclones_drift = False
+        self.has_hit_combo = False
+        self.has_jade_ignition = False
+        self.has_shadowboxing = False
+        self.has_dance_of_chiji = False
+        self.has_energy_burst = False
+        self.has_obsidian_spiral = False
+        self.has_combo_breaker = False
+        self.has_drinking_horn_cover = False
+
+        self.has_universal_energy = False
+        self.has_weapon_of_wind = False
+        self.has_jadefire_stomp = False
+
+        self.teb_stacks = 10
+        self.teb_timer = 8.0
+        self.teb_active_bonus = 0.0
+        self.teb_crit_dmg_bonus = 0.0
+        self.has_teb_stacking = False
+        self.has_martial_agility = False
+
+        self.has_path_of_jade = False
+        self.has_singularly_focused_jade = False
+        self.has_flurry_of_xuen = False
+
+        # [Shado-Pan] Flags & Stats
+        self.armor_pen = 0.0
+        self.flurry_charges = 0
+        self.stand_ready_active = False
+
+        self.has_shado_pan_base = False
+        self.has_pride_of_pandaria = False
+        self.has_high_impact = False
+        self.has_shado_over_battlefield = False
+        self.has_one_versus_many = False
+        self.has_stand_ready = False
+        self.has_weapons_of_the_wall = False
+        self.has_wisdom_of_the_wall = False
+        self.has_veterans_eye = False
+
+        # [COTC] Conduit of the Celestials Flags & State
+        self.simulation_time = 0.0
+        self.cooldown_recovery_rate = 1.0
+        self.recent_damage_window = [] # List of (timestamp, amount)
+        self.inner_compass_state = 0 # 0: Crane, 1: Tiger, 2: Ox, 3: Serpent
+        self.conduit_window_timer = 0.0
+        self.can_cast_conduit = False
+        self.niuzao_ready = False
+        self.guaranteed_courage_proc = False
+        self.jade_serpent_cdr_active = False
+        self.jade_serpent_cdr_duration = 0.0
+
+        self.xuen_lightning_timer = 0.0
+        self.xuen_empowered_timer = 0.0
+
+        self.has_cotc_base = False
+        self.has_xuens_bond = False
+        self.has_celestial_conduit = False
+        self.has_heart_of_jade_serpent = False
+        self.has_strength_of_black_ox = False
+        self.has_inner_compass = False
+        self.has_courage_of_white_tiger = False
+        self.has_xuens_guidance = False
+        self.has_temple_training = False
+        self.has_restore_balance = False
+        self.has_path_of_falling_star = False
+        self.has_unity_within = False
+
+        self.totm_stacks = 0
+        self.max_totm_stacks = 4
+
+        self.hit_combo_stacks = 0
+
+        self.combo_breaker_stacks = 0
+
+        self.dance_of_chiji_stacks = 0
+        self.dance_of_chiji_duration = 0.0
+
+        self.thunderfist_stacks = 0
+        self.thunderfist_icd_timer = 0.0
+
+        self.rwk_ready = False
+
+        # 自动攻击计时器
+        self.swing_timer = 0.0
+        if self.weapon_type == '2h':
+            self.base_swing_time = 3.5
+        else:  # dw
+            self.base_swing_time = 2.6
+
+        self.update_stats()
+
+    # [COTC] Damage History Methods
+    def record_damage(self, amount):
+        self.recent_damage_window.append((self.simulation_time, amount))
+
+    def get_damage_last_4s(self):
+        cutoff = self.simulation_time - 4.0
+        return sum(d for t, d in self.recent_damage_window if t > cutoff)
+
+    # [COTC] Inner Compass Logic
+    def advance_inner_compass(self):
+        if self.has_inner_compass:
+            self.inner_compass_state = (self.inner_compass_state + 1) % 4
+            self.update_stats()
+
+    def get_physical_mitigation(self):
+        # Boss physical DR = 30%
+        # Effective DR = 0.30 * (1 - armor_pen)
+        effective_dr = 0.30 * (1.0 - self.armor_pen)
+        return 1.0 - effective_dr
+
+    def update_stats(self):
+        raw_crit = (self.rating_crit / 4600.0) + self.base_crit
+        crit_bonus = self.talent_crit_bonus
+        if self.xuen_active:
+            crit_bonus *= 2.0
+        self.crit = raw_crit + crit_bonus
+
+        self.versatility = (self.rating_vers / 5400.0)
+
+        raw_haste = (self.rating_haste / 4400.0)
+
+        if self.has_cyclones_drift:
+            self.haste = raw_haste * 1.10
+        else:
+            self.haste = raw_haste
+
+        # Veterans Eye
+        if self.has_veterans_eye:
+             self.haste += 0.05
+
+        # [COTC] Inner Compass Stats
+        if self.has_inner_compass:
+            # 0: Crane (+2% Haste), 1: Tiger (+2% Crit), 2: Ox (+2% Vers), 3: Serpent (+2% Mastery)
+            if self.inner_compass_state == 0:
+                self.haste += 0.02
+            elif self.inner_compass_state == 1:
+                self.crit += 0.02
+            elif self.inner_compass_state == 2:
+                self.versatility += 0.02
+
+        dr_threshold = 1380
+        eff_mast_rating = self.rating_mastery
+        if self.rating_mastery > dr_threshold:
+            excess = self.rating_mastery - dr_threshold
+            eff_mast_rating = dr_threshold + (excess * 0.9)
+        self.mastery = (eff_mast_rating / 2000.0) + self.base_mastery
+
+        if self.has_inner_compass and self.inner_compass_state == 3:
+            self.mastery += 0.02
+
     def advance_time(self, duration, damage_meter=None, use_expected_value=False):
         total_damage = 0
         dt = 0.01
@@ -6,295 +218,7 @@
         log_entries = []
 
         while elapsed < duration:
-            # Advance simulation time in small steps (dt or remainder)
             step = min(dt, duration - elapsed)
-
-            # --- Auto Attack Logic (Decoupled from step size where possible) ---
-            # We want to process swings that happen within this 'step'
-            # Instead of just decrementing, we calculate if swing_timer hits 0 within 'step'
-
-            current_step_processed = 0.0
-
-            # Use a while loop to handle very fast swings or large steps (though step is small)
-            # Effectively, if swing_timer < step, we trigger event, reset timer, and continue
-
-            temp_step = step
-            step_damage = 0.0
-
-            while self.swing_timer <= temp_step:
-                # Consume time until swing
-                time_to_swing = self.swing_timer
-                temp_step -= time_to_swing
-
-                # Update cooldowns/timers by the partial amount?
-                # Doing that inside this inner loop is complex for other timers.
-                # Simplification: We assume other timers tick linearly for 'step'.
-                # But we record the swing event at 'elapsed + time_to_swing'
-
-                swing_speed_mod = 1.0 + self.haste
-                if self.momentum_buff_active:
-                    swing_speed_mod *= 1.6
-
-                if self.has_martial_agility:
-                    ma_mod = 1.3
-                    if self.zenith_active:
-                        ma_mod = 1.6
-                    swing_speed_mod *= ma_mod
-
-                # Reset Timer
-                self.swing_timer = self.base_swing_time / swing_speed_mod
-
-                # --- Execute Swing ---
-                # [Task 3 & 2] Thunderfist Consumption on Auto Attack
-                thunderfist_dmg = 0.0
-                thunderfist_proc = False
-
-                if self.thunderfist_stacks > 0 and self.thunderfist_icd_timer <= 0:
-                    self.thunderfist_stacks -= 1
-                    self.thunderfist_icd_timer = 1.5
-                    thunderfist_proc = True
-                    tf_base = 1.61 * self.attack_power * self.agility
-
-                is_dual_threat = False
-                if self.has_dual_threat:
-                    if use_expected_value:
-                        pass
-                    else:
-                        is_dual_threat = random.random() < 0.30
-
-                coeff = 1.0
-                if self.weapon_type == '2h':
-                    coeff = 2.40
-                else:
-                    coeff = 1.80 # DW
-
-                dual_coeff = 3.726
-
-                final_coeff = coeff
-                if use_expected_value and self.has_dual_threat:
-                     final_coeff = (0.7 * coeff) + (0.3 * dual_coeff)
-                elif is_dual_threat:
-                     final_coeff = dual_coeff
-
-                base_dmg = final_coeff * self.attack_power * self.agility
-
-                crit_chance = self.crit
-                crit_mult = 2.0
-                dmg_mod = 1.0 + self.versatility
-
-                if self.has_restore_balance and self.xuen_active:
-                    dmg_mod *= 1.05
-
-                if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
-                    dmg_mod *= 1.10
-
-                if use_expected_value:
-                    expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
-                else:
-                     is_crit = random.random() < crit_chance
-                     expected_dmg = (base_dmg * dmg_mod) * (crit_mult if is_crit else 1.0)
-                     if is_crit: crit_chance = 1.0 # For display
-
-                step_damage += expected_dmg
-                self.record_damage(expected_dmg)
-
-                key = "Dual Threat" if is_dual_threat else "Auto Attack"
-                if use_expected_value and self.has_dual_threat:
-                     key = "Auto Attack (EV w/ DT)"
-
-                if damage_meter is not None:
-                    damage_meter[key] = damage_meter.get(key, 0) + expected_dmg
-
-                breakdown = {
-                    'base': int(base_dmg),
-                    'modifiers': ['Versatility: x%.2f' % (1.0 + self.versatility)],
-                    'crit_sources': ['Base: %.1f%%' % (self.crit*100)],
-                    'final_crit': crit_chance,
-                    'crit_mult': crit_mult
-                }
-
-                if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
-                    breakdown['modifiers'].append('WeaponOfWind: x1.10')
-
-                log_entries.append({
-                    "Action": key,
-                    "Expected DMG": expected_dmg,
-                    "Breakdown": breakdown,
-                    "source": "passive",
-                    "timestamp": elapsed + time_to_swing, # Relative to start of advance_time call
-                    "offset": elapsed + time_to_swing # Legacy key if needed
-                })
-
-                # [Shado-Pan] Flurry Strikes Stacking
-                if self.has_shado_pan_base:
-                    proc_chance = 1.0
-                    if self.weapon_type == 'dw':
-                        proc_chance = (17.14 * 2.6) / 60.0
-
-                    if use_expected_value:
-                        pass
-
-                    if random.random() < proc_chance:
-                        stacks_to_add = 1
-                        if self.has_one_versus_many and random.random() < crit_chance:
-                            stacks_to_add = 2
-                        self.flurry_charges += stacks_to_add
-
-                # [Shado-Pan] Stand Ready Trigger
-                if self.stand_ready_active:
-                    self.stand_ready_active = False
-
-                    stacks = self.flurry_charges
-                    self.flurry_charges = 0
-
-                    if stacks > 0:
-                        flurry_coeff = 0.6
-                        flurry_base = flurry_coeff * self.attack_power * self.agility * stacks
-
-                        mitigation = self.get_physical_mitigation()
-                        flurry_base *= mitigation
-
-                        f_mod = 1.0 + self.versatility
-
-                        if self.has_restore_balance and self.xuen_active:
-                            f_mod *= 1.05
-                        f_mod *= 0.7
-
-                        flurry_crit = self.crit
-                        if self.has_pride_of_pandaria:
-                            flurry_crit += 0.15
-
-                        if use_expected_value:
-                             flurry_dmg = flurry_base * f_mod * (1 + (flurry_crit * (crit_mult - 1)))
-                        else:
-                             flurry_dmg = flurry_base * f_mod * (1 + (flurry_crit * (crit_mult - 1)))
-
-                        step_damage += flurry_dmg
-                        self.record_damage(flurry_dmg)
-
-                        if damage_meter is not None:
-                            damage_meter['Flurry Strikes'] = damage_meter.get('Flurry Strikes', 0) + flurry_dmg
-
-                        log_entries.append({
-                            "Action": f"Flurry Strikes (Stand Ready) x{stacks}",
-                            "Expected DMG": flurry_dmg,
-                            "Breakdown": {
-                                "base": int(flurry_base),
-                                "modifiers": ["StandReady: x0.7", f"Mitigation: x{mitigation:.2f}"],
-                                "final_crit": flurry_crit
-                            },
-                            "source": "passive",
-                            "timestamp": elapsed + time_to_swing
-                        })
-
-                        if self.has_shado_over_battlefield:
-                            sob_coeff = 0.52
-                            sob_base = sob_coeff * self.attack_power * self.agility * stacks
-                            sob_mod = 1.0 + self.versatility
-                            if getattr(self, 'has_universal_energy', False):
-                                sob_mod *= 1.15
-                            if self.has_restore_balance and self.xuen_active:
-                                sob_mod *= 1.05
-
-                            eff_targets = self.target_count
-                            scale = 1.0
-                            if eff_targets > 8:
-                                scale = (8.0 / eff_targets) ** 0.5
-
-                            if use_expected_value:
-                                sob_total = sob_base * sob_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
-                            else:
-                                sob_total = sob_base * sob_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
-
-                            step_damage += sob_total
-                            self.record_damage(sob_total)
-
-                            if damage_meter is not None:
-                                damage_meter['Shado Over Battlefield'] = damage_meter.get('Shado Over Battlefield', 0) + sob_total
-
-                            log_entries.append({
-                                "Action": "Shado Over Battlefield",
-                                "Expected DMG": sob_total,
-                                "source": "passive",
-                                "timestamp": elapsed + time_to_swing
-                            })
-
-                        if self.has_high_impact:
-                            hi_coeff = 1.0
-                            hi_base = hi_coeff * self.attack_power * self.agility * stacks
-
-                            hi_mod = 1.0 + self.versatility
-                            if self.has_restore_balance and self.xuen_active:
-                                hi_mod *= 1.05
-
-                            eff_targets = self.target_count
-                            scale = 1.0
-                            if eff_targets > 8:
-                                scale = (8.0 / eff_targets) ** 0.5
-
-                            if use_expected_value:
-                                hi_total = hi_base * hi_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
-                            else:
-                                hi_total = hi_base * hi_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
-
-                            step_damage += hi_total
-                            self.record_damage(hi_total)
-
-                            if damage_meter is not None:
-                                damage_meter['High Impact'] = damage_meter.get('High Impact', 0) + hi_total
-
-
-                # Handle Thunderfist Event
-                if thunderfist_proc:
-                    tf_mod = 1.0 + self.versatility
-                    if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
-                        tf_mod *= 1.10
-
-                    if self.has_restore_balance and self.xuen_active:
-                        tf_mod *= 1.05
-
-                    if getattr(self, 'has_universal_energy', False):
-                        tf_mod *= 1.15
-
-                    tf_crit = self.crit
-
-                    if use_expected_value:
-                        tf_expected = (tf_base * tf_mod) * (1 + (tf_crit * (crit_mult - 1)))
-                    else:
-                        is_crit = random.random() < tf_crit
-                        tf_expected = (tf_base * tf_mod) * (crit_mult if is_crit else 1.0)
-                        if is_crit: tf_crit = 1.0
-
-                    step_damage += tf_expected
-                    self.record_damage(tf_expected)
-
-                    if damage_meter is not None:
-                        damage_meter['Thunderfist'] = damage_meter.get('Thunderfist', 0) + tf_expected
-
-                    tf_breakdown = {
-                        'base': int(tf_base),
-                        'modifiers': ['Versatility: x%.2f' % (1.0 + self.versatility)],
-                        'crit_sources': ['Base: %.1f%%' % (self.crit*100)],
-                        'final_crit': tf_crit,
-                        'crit_mult': crit_mult
-                    }
-                    if getattr(self, 'has_universal_energy', False):
-                        tf_breakdown['modifiers'].append('UniversalEnergy: x1.15')
-
-                    log_entries.append({
-                        "Action": "Thunderfist",
-                        "Expected DMG": tf_expected,
-                        "Breakdown": tf_breakdown,
-                        "source": "passive",
-                        "timestamp": elapsed + time_to_swing
-                    })
-
-            # After Loop: Decrease Swing Timer by actual elapsed step
-            self.swing_timer -= step
-            total_damage += step_damage
-
-            # --- End Auto Attack Logic ---
-
             self.simulation_time += step
 
             if self.jade_serpent_cdr_active:
@@ -366,7 +290,7 @@
                             "Action": "Xuen: Tiger Lightning",
                             "Expected DMG": tl_total,
                             "source": "passive",
-                            "timestamp": elapsed
+                            "offset": elapsed
                         })
 
                     # Empowered Lightning
@@ -385,7 +309,7 @@
                             "Action": "Xuen: Empowered Lightning",
                             "Expected DMG": el_total,
                             "source": "passive",
-                            "timestamp": elapsed
+                            "offset": elapsed
                         })
 
 
@@ -404,6 +328,269 @@
                 if self.dance_of_chiji_duration <= 0:
                     self.dance_of_chiji_stacks = 0
                     self.dance_of_chiji_duration = 0.0
+
+            self.swing_timer -= step
+            if self.swing_timer <= 0:
+                swing_speed_mod = 1.0 + self.haste
+                if self.momentum_buff_active:
+                    swing_speed_mod *= 1.6
+
+                if self.has_martial_agility:
+                    ma_mod = 1.3
+                    if self.zenith_active:
+                        ma_mod = 1.6
+                    swing_speed_mod *= ma_mod
+
+                self.swing_timer += self.base_swing_time / swing_speed_mod
+
+                # [Task 3 & 2] Thunderfist Consumption on Auto Attack
+                thunderfist_dmg = 0.0
+                thunderfist_proc = False
+
+                if self.thunderfist_stacks > 0 and self.thunderfist_icd_timer <= 0:
+                    self.thunderfist_stacks -= 1
+                    self.thunderfist_icd_timer = 1.5
+                    thunderfist_proc = True
+                    # Corrected: AP * Agility
+                    tf_base = 1.61 * self.attack_power * self.agility
+
+                is_dual_threat = False
+                if self.has_dual_threat:
+                    if use_expected_value:
+                        pass
+                    else:
+                        is_dual_threat = random.random() < 0.30
+
+                coeff = 1.0
+                if self.weapon_type == '2h':
+                    coeff = 2.40
+                else:
+                    coeff = 1.80 # DW
+
+                dual_coeff = 3.726
+
+                final_coeff = coeff
+                if use_expected_value and self.has_dual_threat:
+                     # Weighted Average
+                     final_coeff = (0.7 * coeff) + (0.3 * dual_coeff)
+                elif is_dual_threat:
+                     final_coeff = dual_coeff
+
+                # Corrected: AP * Agility
+                base_dmg = final_coeff * self.attack_power * self.agility
+
+                crit_chance = self.crit
+                crit_mult = 2.0
+                dmg_mod = 1.0 + self.versatility
+
+                if self.has_restore_balance and self.xuen_active:
+                    dmg_mod *= 1.05
+
+                if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
+                    dmg_mod *= 1.10
+
+                if use_expected_value:
+                    expected_dmg = (base_dmg * dmg_mod) * (1 + (crit_chance * (crit_mult - 1)))
+                else:
+                     is_crit = random.random() < crit_chance
+                     expected_dmg = (base_dmg * dmg_mod) * (crit_mult if is_crit else 1.0)
+                     if is_crit: crit_chance = 1.0 # For display
+
+                total_damage += expected_dmg
+                self.record_damage(expected_dmg)
+
+                key = "Dual Threat" if is_dual_threat else "Auto Attack"
+                if use_expected_value and self.has_dual_threat:
+                     key = "Auto Attack (EV w/ DT)"
+
+                if damage_meter is not None:
+                    damage_meter[key] = damage_meter.get(key, 0) + expected_dmg
+
+                breakdown = {
+                    'base': int(base_dmg),
+                    'modifiers': ['Versatility: x%.2f' % (1.0 + self.versatility)],
+                    'crit_sources': ['Base: %.1f%%' % (self.crit*100)],
+                    'final_crit': crit_chance,
+                    'crit_mult': crit_mult
+                }
+
+                if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
+                    breakdown['modifiers'].append('WeaponOfWind: x1.10')
+
+                log_entries.append({
+                    "Action": key,
+                    "Expected DMG": expected_dmg,
+                    "Breakdown": breakdown,
+                    "source": "passive",
+                    "offset": elapsed
+                })
+
+                # [Shado-Pan] Flurry Strikes Stacking
+                if self.has_shado_pan_base:
+                    proc_chance = 1.0
+                    if self.weapon_type == 'dw':
+                        proc_chance = (17.14 * 2.6) / 60.0
+
+                    if use_expected_value:
+                        pass
+
+                    if random.random() < proc_chance:
+                        stacks_to_add = 1
+                        if self.has_one_versus_many and random.random() < crit_chance:
+                            stacks_to_add = 2
+                        self.flurry_charges += stacks_to_add
+
+                # [Shado-Pan] Stand Ready Trigger
+                if self.stand_ready_active:
+                    self.stand_ready_active = False
+
+                    stacks = self.flurry_charges
+                    self.flurry_charges = 0
+
+                    if stacks > 0:
+                        flurry_coeff = 0.6
+                        # Corrected: AP * Agility
+                        flurry_base = flurry_coeff * self.attack_power * self.agility * stacks
+
+                        mitigation = self.get_physical_mitigation()
+                        flurry_base *= mitigation
+
+                        f_mod = 1.0 + self.versatility
+
+                        if self.has_restore_balance and self.xuen_active:
+                            f_mod *= 1.05
+                        f_mod *= 0.7
+
+                        flurry_crit = self.crit
+                        if self.has_pride_of_pandaria:
+                            flurry_crit += 0.15
+
+                        if use_expected_value:
+                             flurry_dmg = flurry_base * f_mod * (1 + (flurry_crit * (crit_mult - 1)))
+                        else:
+                             flurry_dmg = flurry_base * f_mod * (1 + (flurry_crit * (crit_mult - 1)))
+
+                        total_damage += flurry_dmg
+                        self.record_damage(flurry_dmg)
+
+                        if damage_meter is not None:
+                            damage_meter['Flurry Strikes'] = damage_meter.get('Flurry Strikes', 0) + flurry_dmg
+
+                        log_entries.append({
+                            "Action": f"Flurry Strikes (Stand Ready) x{stacks}",
+                            "Expected DMG": flurry_dmg,
+                            "Breakdown": {
+                                "base": int(flurry_base),
+                                "modifiers": ["StandReady: x0.7", f"Mitigation: x{mitigation:.2f}"],
+                                "final_crit": flurry_crit
+                            },
+                            "source": "passive",
+                            "offset": elapsed
+                        })
+
+                        if self.has_shado_over_battlefield:
+                            sob_coeff = 0.52
+                            # Corrected: AP * Agility
+                            sob_base = sob_coeff * self.attack_power * self.agility * stacks
+                            sob_mod = 1.0 + self.versatility
+                            if getattr(self, 'has_universal_energy', False):
+                                sob_mod *= 1.15
+                            if self.has_restore_balance and self.xuen_active:
+                                sob_mod *= 1.05
+
+                            eff_targets = self.target_count
+                            scale = 1.0
+                            if eff_targets > 8:
+                                scale = (8.0 / eff_targets) ** 0.5
+
+                            if use_expected_value:
+                                sob_total = sob_base * sob_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+                            else:
+                                sob_total = sob_base * sob_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+
+                            total_damage += sob_total
+                            self.record_damage(sob_total)
+
+                            if damage_meter is not None:
+                                damage_meter['Shado Over Battlefield'] = damage_meter.get('Shado Over Battlefield', 0) + sob_total
+
+                            log_entries.append({
+                                "Action": "Shado Over Battlefield",
+                                "Expected DMG": sob_total,
+                                "source": "passive",
+                                "offset": elapsed
+                            })
+
+                        if self.has_high_impact:
+                            hi_coeff = 1.0
+                            # Corrected: AP * Agility
+                            hi_base = hi_coeff * self.attack_power * self.agility * stacks
+
+                            hi_mod = 1.0 + self.versatility
+                            if self.has_restore_balance and self.xuen_active:
+                                hi_mod *= 1.05
+
+                            eff_targets = self.target_count
+                            scale = 1.0
+                            if eff_targets > 8:
+                                scale = (8.0 / eff_targets) ** 0.5
+
+                            if use_expected_value:
+                                hi_total = hi_base * hi_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+                            else:
+                                hi_total = hi_base * hi_mod * eff_targets * scale * (1 + (flurry_crit * (crit_mult - 1)))
+
+                            total_damage += hi_total
+                            self.record_damage(hi_total)
+
+                            if damage_meter is not None:
+                                damage_meter['High Impact'] = damage_meter.get('High Impact', 0) + hi_total
+
+
+                # Handle Thunderfist Event
+                if thunderfist_proc:
+                    tf_mod = 1.0 + self.versatility
+                    if self.zenith_active and getattr(self, 'has_weapon_of_wind', False):
+                        tf_mod *= 1.10
+
+                    if self.has_restore_balance and self.xuen_active:
+                        tf_mod *= 1.05
+
+                    if getattr(self, 'has_universal_energy', False):
+                        tf_mod *= 1.15
+
+                    tf_crit = self.crit
+
+                    if use_expected_value:
+                        tf_expected = (tf_base * tf_mod) * (1 + (tf_crit * (crit_mult - 1)))
+                    else:
+                        is_crit = random.random() < tf_crit
+                        tf_expected = (tf_base * tf_mod) * (crit_mult if is_crit else 1.0)
+                        if is_crit: tf_crit = 1.0
+
+                    total_damage += tf_expected
+                    self.record_damage(tf_expected)
+
+                    if damage_meter is not None:
+                        damage_meter['Thunderfist'] = damage_meter.get('Thunderfist', 0) + tf_expected
+
+                    tf_breakdown = {
+                        'base': int(tf_base),
+                        'modifiers': ['Versatility: x%.2f' % (1.0 + self.versatility)],
+                        'crit_sources': ['Base: %.1f%%' % (self.crit*100)],
+                        'final_crit': tf_crit,
+                        'crit_mult': crit_mult
+                    }
+                    if getattr(self, 'has_universal_energy', False):
+                        tf_breakdown['modifiers'].append('UniversalEnergy: x1.15')
+
+                    log_entries.append({
+                        "Action": "Thunderfist",
+                        "Expected DMG": tf_expected,
+                        "Breakdown": tf_breakdown,
+                        "source": "passive",
+                        "offset": elapsed
+                    })
 
             if self.is_channeling:
                 self.channel_time_remaining -= step
@@ -426,7 +613,7 @@
                             "Expected DMG": tick_dmg,
                             "Breakdown": breakdown,
                             "source": "active",
-                            "timestamp": elapsed
+                            "offset": elapsed
                         })
 
                 if self.channel_time_remaining <= 1e-6 or self.channel_ticks_remaining <= 0:
@@ -445,7 +632,7 @@
                             "Expected DMG": burst_dmg,
                             "Breakdown": breakdown,
                             "source": "passive",
-                            "timestamp": elapsed
+                            "offset": elapsed
                         })
 
 
@@ -500,7 +687,7 @@
                                     "modifiers": ["SoftCap" if eff_target_count>5 else "Uncapped", f"PathJade:{poj_bonus:.2f}"],
                                 },
                                 "source": "passive",
-                                "timestamp": elapsed
+                                "offset": elapsed
                             })
 
                     self.is_channeling = False
