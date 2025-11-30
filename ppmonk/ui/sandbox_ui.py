@@ -75,10 +75,11 @@ class DraggableBlock:
     def _on_press(self, event):
         self.start_x = event.x
         self.dragging = False
-        self.on_click(self.data) # Show info
+        # Click action moved to release to distinguish from drag
 
     def _on_drag(self, event):
         if not self.dragging:
+            # Add a small threshold if needed, but standard drag is usually immediate
             self.dragging = True
             self.canvas.lift(self.item_id) # Bring to front
 
@@ -89,6 +90,8 @@ class DraggableBlock:
     def _on_release(self, event):
         if self.dragging:
             self.on_drag_end(self.item_id, event.x) # Pass final X to calculate new index
+        else:
+            self.on_click(self.data) # Only show info if not dragged
         self.dragging = False
 
     def _on_right_click(self, event):
