@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+from ppmonk.core.talents import TALENT_DB
 
 # Task 2: Talent Tree Refactor
 CANVAS_WIDTH = 1800
@@ -8,6 +9,104 @@ NODE_WIDTH = 100
 NODE_HEIGHT = 55
 X_GAP = 140
 Y_GAP = 100
+
+TALENT_LOCALIZATION = {
+    # Row 1
+    "1-1": "怒雷破",
+
+    # Row 2
+    "2-1": "动如脱兔",
+    "2-2": "战斗智慧",
+    "2-3": "迅疾如风",
+
+    # Row 3
+    "3-1": "猛虎之触",
+    "3-2": "凶猛",
+    "3-3": "铁掌功",
+    "3-4": "升腾",
+
+    # Row 4
+    "4-1": "双重威胁",
+    "4-2": "禅院教诲",
+    "4-3": "旭日峥嵘",
+
+    # Row 5
+    "5-1": "神鹤旋风",
+    "5-2": "穴位打击",
+    "5-3": "升龙霸",
+    "5-4": "顶峰",
+    "5-5": "连击",
+    "5-6": "格斗大师",
+
+    # Row 6
+    "6-1": "碧玉点火",
+    "6-2": "神鹤/碎玉",
+    "Cyclone's\nDrift": "神鹤狂风",
+    "Crashing\nFists": "碎玉闪电",
+    "6-3": "专注/壮胆",
+    "Spiritual\nFocus": "精神专注",
+    "Drinking\nHorn Cover": "豪能酒",
+    "6-4": "黑曜石",
+    "6-5": "组合拳",
+
+    # Row 7
+    "7-1": "赤精之舞",
+    "7-2": "暗影拳",
+    "7-3": "升龙/风击",
+    "Whirling\nDragon Punch": "升龙霸",
+    "Strike of\nWindlord": "风击",
+    "7-4": "能量爆发",
+    "7-5": "内心的平静",
+
+    # Row 8
+    "8-1": "虎眼酒",
+    "8-2": "连环打击",
+    "8-3": "阳炎之魂",
+    "8-4": "风之感召",
+    "8-5": "回旋/回响",
+    "Echo\nTechnique": "回响",
+    "Revolving\nWhirl": "回旋",
+    "8-6": "万物能量",
+    "8-7": "禅院记忆",
+
+    # Row 9
+    "9-1": "虎眼增强",
+    "9-2": "碧玉疾风",
+    "9-3": "白虎战甲",
+    "9-4": "雷拳",
+    "9-5": "风之兵器",
+    "9-6": "破碎神庙",
+    "9-7": "切削之风",
+    "9-8": "妖魂踏",
+
+    # Row 10
+    "10-1": "虎眼巅峰",
+    "10-2": "天火",
+    "10-3": "谐和",
+    "10-4": "白虎连击",
+    "10-5": "武术",
+    "10-6": "空中节奏",
+    "Airborne\nRhythm": "空中节奏",
+    "Hurricane's\nVault": "飓风",
+    "10-7": "碧玉/专注",
+    "Path of\nJade": "碧玉之路",
+    "Singularly\nFocused": "专注碧玉",
+
+    # Hero - Shado-Pan
+    "hero-sp-header": "影踪派",
+    "hero-sp-choice1": "潘达利亚",
+    "Pride of\nPandaria": "潘达利亚\n的骄傲",
+    "High\nImpact": "强力冲击",
+
+    # Hero - CotC
+    "hero-cotc-header": "天神御身",
+    "hero-cotc-choice1": "雪怒指引",
+    "Xuen's\nGuidance": "雪怒指引",
+    "Temple\nTraining": "寺院训练",
+    "hero-cotc-choice2": "恢复平衡",
+    "Restore\nBalance": "恢复平衡",
+    "Xuen's\nBond": "雪怒羁绊"
+}
 
 MONK_TALENT_DATA = [
     # --- Row 1 ---
@@ -145,10 +244,13 @@ class TalentNode:
         self.btn.bind("<Button-3>", self.on_right_click)
 
     def _get_text(self):
+        label = ""
         if self.is_choice and self.choices:
-            label = self.choices[self.current_choice_idx]
+            raw_label = self.choices[self.current_choice_idx]
+            label = TALENT_LOCALIZATION.get(raw_label, raw_label)
         else:
-            label = self.data['label']
+            raw_label = self.id
+            label = TALENT_LOCALIZATION.get(raw_label, self.data['label'])
 
         if self.max_rank > 1:
             return f"{label}\n{self.current_rank}/{self.max_rank}"
@@ -338,5 +440,6 @@ class TalentTreeWindow(ctk.CTkToplevel):
 
             final_list.append(lookup_key)
 
+        self.on_close_callback(final_list)
         self.on_close_callback(final_list)
         self.destroy()
