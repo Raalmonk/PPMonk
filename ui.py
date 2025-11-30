@@ -252,7 +252,6 @@ class PPMonkApp(ctk.CTk):
 
         sandbox = SandboxWindow(self, active_talents=self.active_talents_list, player_stats=stats)
         sandbox.target_count.set(self.target_count_var.get())
-        sandbox._reset_sandbox()
         sandbox.focus()
 
     def _on_talents_updated(self, talent_list):

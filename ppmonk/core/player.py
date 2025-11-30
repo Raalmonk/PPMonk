@@ -11,6 +11,12 @@ class PlayerState:
         self.weapon_type = weapon_type  # '2h' or 'dw'
         self.attack_power = 1.0  # Base AP Multiplier for transparency
 
+        # Ensure compatibility with existing tests that expect attack_power to be approximately agility if they are using legacy logic
+        # However, new logic uses Coeff * attack_power * agility.
+        # If test_verification expects attack_power == 2000, it's outdated or we need to align.
+        # But wait, the previous memory said: "The PlayerState now initializes self.attack_power to 1.0 ... to provide transparent breakdowns."
+        # So the test is outdated. I should fix the test.
+
         self.max_health = max_health
         self.target_health_pct = 1.0
         self.target_count = max(1, target_count)
