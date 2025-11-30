@@ -1,44 +1,101 @@
+import PyInstaller.__main__
 import os
-import subprocess
-import sys
+import shutil
 
-def build_exe():
-    """
-    Builds the executable using PyInstaller.
-    Requires 'pyinstaller' to be installed (pip install pyinstaller).
-    """
+def build():
+    # Clean previous build
+    if os.path.exists('build'): shutil.rmtree('build')
+    if os.path.exists('dist'): shutil.rmtree('dist')
 
-    # Define main entry point
-    main_script = "main.py"
+    # Define assets separator
+    sep = ';' if os.name == 'nt' else ':'
 
-    # Define assets path (Windows separator ';', Unix ':')
-    # Assuming Windows for "exe" request, but PyInstaller handles separator if we use `add_data` arg format correctly or detect OS.
-    # The standard format for PyInstaller command line is "src;dest" on Windows.
+    spec_content = r"""
+# -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all
+import os
 
-    sep = ";" if os.name == 'nt' else ":"
-    assets_arg = f"assets{sep}assets"
+datas = []
+binaries = []
+hiddenimports = []
 
-    cmd = [
-        "pyinstaller",
-        "--noconsole",          # Don't show console window (GUI app)
-        "--onefile",            # Bundle everything into a single .exe
-        "--name=PPMonkSim",     # Name of the output executable
-        f"--add-data={assets_arg}", # Include assets folder
-        "--clean",              # Clean cache
-        main_script
-    ]
+# Collect packages with known DLL issues or hidden imports
+packages_to_collect = [
+    'customtkinter',
+    'torch',
+    'sb3_contrib',
+    'stable_baselines3',
+    'gymnasium',
+    'pandas',
+    'numpy',
+    'PIL'
+]
 
-    print("Building EXE with command:")
-    print(" ".join(cmd))
-
+for pkg in packages_to_collect:
     try:
-        subprocess.check_call(cmd)
-        print("\nBuild successful! Check the 'dist' folder for PPMonkSim.exe")
-    except subprocess.CalledProcessError as e:
-        print(f"\nBuild failed: {e}")
-        print("Ensure pyinstaller is installed: pip install pyinstaller")
-    except FileNotFoundError:
-        print("\nPyInstaller not found. Please install it with: pip install pyinstaller")
+        tmp = collect_all(pkg)
+        datas += tmp[0]
+        binaries += tmp[1]
+        hiddenimports += tmp[2]
+    except Exception as e:
+        print(f"Warning: could not collect {pkg}: {e}")
+
+# Add manual assets
+# Assume running from repo root
+datas += [('assets', 'assets')]
+
+block_cipher = None
+
+a = Analysis(
+    ['ui.py'],
+    pathex=[],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='PPMonkSim',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+"""
+
+    with open('PPMonk_Sim.spec', 'w', encoding='utf-8') as f:
+        f.write(spec_content)
+
+    print("Running PyInstaller...")
+    # Run PyInstaller with the generated spec file
+    PyInstaller.__main__.run([
+        'PPMonk_Sim.spec',
+        '--clean',
+        '--noconfirm'
+    ])
 
 if __name__ == "__main__":
-    build_exe()
+    build()
