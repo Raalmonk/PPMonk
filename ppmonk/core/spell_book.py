@@ -520,6 +520,17 @@ class Spell:
                  current_mult *= (1.0 + rwk_bonus)
                  modifiers.append(f"RWK_Targets: x{1+rwk_bonus:.2f}")
 
+        # [Momentum Boost] Haste scaling and Tick Ramp
+        if self.haste_dmg_scaling:
+             h_mod = 1.0 + player.haste
+             current_mult *= h_mod
+             modifiers.append(f"MomentumHaste: x{h_mod:.2f}")
+
+        if self.tick_dmg_ramp > 0.0:
+             ramp_val = 1.0 + (self.tick_dmg_ramp * tick_idx)
+             current_mult *= ramp_val
+             modifiers.append(f"MomentumRamp(Tick{tick_idx}): x{ramp_val:.2f}")
+
         if self.abbr == 'SCK' and getattr(player, 'channel_docj_snapshot', False):
              current_mult *= 2.0
              modifiers.append("DanceOfChiJi: x2.00")
