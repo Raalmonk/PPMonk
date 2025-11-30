@@ -1,9 +1,3 @@
-import torch
-from sb3_contrib import MaskablePPO
-from sb3_contrib.common.wrappers import ActionMasker
-from stable_baselines3.common.vec_env import SubprocVecEnv
-
-from ppmonk.core.callbacks import TrainingControlCallback
 from ppmonk.core.visualizer import TimelineDataCollector
 from ppmonk.envs.monk_env import MonkEnv
 
@@ -19,6 +13,9 @@ def mask_fn(env):
 
 def make_env(rank, current_talents, player_kwargs):
     def _init():
+        from sb3_contrib.common.wrappers import ActionMasker
+        from ppmonk.envs.monk_env import MonkEnv
+
         env = MonkEnv(seed_offset=rank, current_talents=current_talents, player_kwargs=player_kwargs)
         env = ActionMasker(env, mask_fn)
         return env
@@ -39,6 +36,11 @@ def run_simulation(
         target_count=1,
         **kwargs
 ):
+    import torch
+    from sb3_contrib import MaskablePPO
+    from stable_baselines3.common.vec_env import SubprocVecEnv
+    from ppmonk.core.callbacks import TrainingControlCallback
+
     if talents is None: talents = ['WDP', 'SW', 'Ascension', 'Zenith']
 
     def log(msg):
