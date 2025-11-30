@@ -117,16 +117,9 @@ class SandboxWindow(ctk.CTkToplevel):
         self.simulation_events = [] # Stores derived events: (name, time, damage)
         self.sequence_time_map = [] # [(item, start_time, end_time), ...]
 
-        # State Snapshots for Cursor
-        self.state_snapshots = [] # [(timestamp, state_dict), ...]
-
         # UI Constants
         self.block_height = 60
         self.block_map = {}
-
-        # Cursor
-        self.cursor_id = None
-        self.is_dragging_cursor = False
 
         self._load_icons()
         self._init_spellbook()
@@ -276,15 +269,10 @@ class SandboxWindow(ctk.CTkToplevel):
         v_scroll.pack(side="right", fill="y")
         self.canvas.pack(side="top", fill="both", expand=True)
 
-        # Bind events for cursor dragging
-        self.canvas.bind("<Button-1>", self._on_canvas_click)
-        self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
-        self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
-
-        # Info Box / Inspector
-        self.info_box = ctk.CTkTextbox(seq_frame, height=200) # Increased height for Inspector
+        # Info Box
+        self.info_box = ctk.CTkTextbox(seq_frame, height=150)
         self.info_box.pack(fill="x", pady=5)
-        self.info_box.insert("1.0", "点击方块查看详情，或拖动竖线查看状态...")
+        self.info_box.insert("1.0", "点击方块查看详情...")
         self.info_box.configure(state="disabled")
 
     def _on_weapon_change(self):
@@ -305,12 +293,6 @@ class SandboxWindow(ctk.CTkToplevel):
             haste = float(self.stat_inputs['haste_rating'].get())
         except:
             haste = 1500.0
-
-        # Update ref player stats from sim player (if available) or defaults
-        if self.sim_player:
-             self.ref_player.haste = self.sim_player.haste
-        else:
-             self.ref_player.haste = 1.0 + (haste / 17000.0)
         # Basic haste calc (approximation)
         haste_pct = haste / 17000.0 # Rough conversion if not using full sim logic in UI
         # Better: use ref_player
@@ -365,97 +347,6 @@ class SandboxWindow(ctk.CTkToplevel):
         if data in self.action_sequence:
             self.action_sequence.remove(data)
             self._recalculate_timeline()
-
-    def _on_canvas_click(self, event):
-        # Check if clicking on cursor or dragging a block
-        # Simple logic: If near cursor X, drag cursor. Else pass to blocks?
-        # Canvas binding vs Item binding: Item binding triggers first.
-        # But we want to allow dragging cursor from anywhere? Or specifically the ruler?
-        # Let's say: dragging on background moves cursor. Dragging block moves block.
-        # Block drag is handled by DraggableBlock item bindings.
-        # This canvas binding handles background clicks.
-
-        canvas_x = self.canvas.canvasx(event.x)
-        self._update_cursor(canvas_x)
-        self.is_dragging_cursor = True
-
-    def _on_canvas_drag(self, event):
-        if self.is_dragging_cursor:
-            canvas_x = self.canvas.canvasx(event.x)
-            self._update_cursor(canvas_x)
-
-    def _on_canvas_release(self, event):
-        self.is_dragging_cursor = False
-
-    def _update_cursor(self, x):
-        # Constrain
-        x = max(HEADER_WIDTH + 10, x)
-
-        # Move visual line
-        if not self.cursor_id:
-            total_height = len(SPELL_GROUPS) * ROW_HEIGHT
-            self.cursor_id = self.canvas.create_line(x, 0, x, total_height, fill="white", width=2, dash=(4, 2))
-        else:
-            self.canvas.coords(self.cursor_id, x, 0, x, len(SPELL_GROUPS) * ROW_HEIGHT)
-            self.canvas.lift(self.cursor_id)
-
-        # Calculate Time
-        relative_x = x - (HEADER_WIDTH + 10)
-        time = relative_x / PIXELS_PER_SECOND
-
-        self._show_state_at_time(time)
-
-    def _show_state_at_time(self, time):
-        # Find closest snapshot
-        # self.state_snapshots is sorted by time
-        if not self.state_snapshots:
-            return
-
-        # Simple linear search or binary search
-        # Given small size, simple iteration is fine
-        closest = self.state_snapshots[0]
-        for snap in self.state_snapshots:
-            if snap['time'] > time:
-                break
-            closest = snap
-
-        # Display Info
-        state = closest['state']
-        text = f"--- 状态监视器 (Time: {time:.2f}s) ---\n"
-        text += f"能量: {int(state['energy'])} / {int(state['max_energy'])}\n"
-        text += f"真气: {state['chi']}\n"
-        text += f"连击层数: {state.get('hit_combo', 0)}\n"
-
-        if state.get('buffs'):
-            text += "\nBuffs:\n"
-            for b, d in state['buffs'].items():
-                text += f"  {b}: {d:.1f}s\n"
-
-        self.info_box.configure(state="normal")
-        self.info_box.delete("1.0", "end")
-        self.info_box.insert("1.0", text)
-        self.info_box.configure(state="disabled")
-
-    def _capture_state_snapshot(self, time):
-        # Capture relevant state from self.sim_player
-        p = self.sim_player
-        buffs = {}
-        if p.xuen_active: buffs['Xuen'] = p.xuen_duration
-        if p.zenith_active: buffs['Zenith'] = p.zenith_duration
-        if p.dance_of_chiji_stacks > 0: buffs[f'DanceOfChiJi ({p.dance_of_chiji_stacks})'] = p.dance_of_chiji_duration
-        if p.combo_breaker_stacks > 0: buffs[f'ComboBreaker ({p.combo_breaker_stacks})'] = 15.0 # Dummy
-        if p.rwk_ready: buffs['RWK Ready'] = 0.0
-
-        return {
-            'time': time,
-            'state': {
-                'energy': p.energy,
-                'max_energy': p.max_energy,
-                'chi': p.chi,
-                'hit_combo': p.hit_combo_stacks,
-                'buffs': buffs
-            }
-        }
 
     def _on_block_click(self, data):
         # Show details in info box
@@ -611,10 +502,6 @@ class SandboxWindow(ctk.CTkToplevel):
         total_damage = 0.0
         self.simulation_events = [] # Clear events
         self.sequence_time_map = [] # Clear time map
-        self.state_snapshots = [] # Clear snapshots
-
-        # Initial snapshot
-        self.state_snapshots.append(self._capture_state_snapshot(0.0))
 
         next_cast_force_reset = False
         next_cast_force_cb = False
@@ -633,21 +520,18 @@ class SandboxWindow(ctk.CTkToplevel):
                 time_elapsed += 0.5
                 item['sim_result'] = {'damage': 0, 'timestamp': time_elapsed, 'breakdown': 'Wait 0.5s', 'duration': 0.5}
                 self.sequence_time_map.append((item, start_time, time_elapsed))
-                self.state_snapshots.append(self._capture_state_snapshot(time_elapsed))
                 continue
 
             if name == "CMD_RESET_RSK":
                 next_cast_force_reset = True
                 item['sim_result'] = {'damage': 0, 'timestamp': time_elapsed, 'breakdown': 'Instruction: Force RSK Reset', 'duration': 0.2} # Visual duration
                 self.sequence_time_map.append((item, start_time, time_elapsed)) # Zero duration or small visual?
-                self.state_snapshots.append(self._capture_state_snapshot(time_elapsed))
                 continue
 
             if name == "CMD_COMBO_BREAKER":
                 next_cast_force_cb = True
                 item['sim_result'] = {'damage': 0, 'timestamp': time_elapsed, 'breakdown': 'Instruction: Force Combo Breaker', 'duration': 0.2}
                 self.sequence_time_map.append((item, start_time, time_elapsed))
-                self.state_snapshots.append(self._capture_state_snapshot(time_elapsed))
                 continue
 
             if name not in self.sim_spell_book.spells:
@@ -728,35 +612,18 @@ class SandboxWindow(ctk.CTkToplevel):
                 'duration': cast_time
             }
             self.sequence_time_map.append((item, start_time, time_elapsed))
-            self.state_snapshots.append(self._capture_state_snapshot(time_elapsed))
 
         # 3. Update Stats
         dps = total_damage / time_elapsed if time_elapsed > 0 else 0
         self.stats_label.configure(text=f"总伤害: {int(total_damage):,} | DPS: {int(dps):,}")
         self.resource_label.configure(text=f"预计结束资源: Energy {int(self.sim_player.energy)} | Chi {self.sim_player.chi}")
 
-        # 4. Refresh Palette with new stats (CD updates)
-        self._populate_palette()
-
-        # 5. Redraw
+        # 4. Redraw
         self._draw_sequence()
 
     def _draw_sequence(self):
         self.canvas.delete("all")
         self.block_map = {} # item_id (tag) -> data
-        self.cursor_id = None # Reset cursor handle
-
-        # 1. Draw Group Headers/Backgrounds
-        for idx, (group_name, _) in enumerate(SPELL_GROUPS):
-            y_start = idx * ROW_HEIGHT
-            # Header Box
-            self.canvas.create_rectangle(0, y_start, HEADER_WIDTH, y_start + ROW_HEIGHT, fill="#2c3e50", outline="#34495e")
-            self.canvas.create_text(10, y_start + ROW_HEIGHT/2, text=group_name, fill="#ecf0f1", anchor="w", width=HEADER_WIDTH-20, font=("Arial", 10, "bold"))
-
-            # Lane Background
-            self.canvas.create_rectangle(HEADER_WIDTH, y_start, 5000, y_start + ROW_HEIGHT, fill="#1a1a1a", outline="#333333")
-
-        # 2. Draw Main Sequence Blocks (Time Scale)
 
         # 1. Draw Group Headers/Backgrounds
         for idx, (group_name, _) in enumerate(SPELL_GROUPS):
