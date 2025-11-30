@@ -326,7 +326,7 @@ class Spell:
                 # Apply same mods as RSK roughly
                 hc_mod = 1.0 + (player.hit_combo_stacks * 0.01) if getattr(player, 'has_hit_combo', False) else 1.0
                 ww_mod = 1.10 if (player.zenith_active and getattr(player, 'has_weapon_of_wind', False)) else 1.0
-                base_glory = glory_dmg * (1 + player.versatility) * hc_mod * ww_mod * (1.0 + player.mastery)
+                base_glory = glory_dmg * (1 + player.versatility) * hc_mod * ww_mod
 
                 crit_c = player.crit + self.bonus_crit_chance
                 if player.zenith_active: crit_c += player.teb_active_bonus
@@ -362,7 +362,7 @@ class Spell:
             ww_mod = 1.10 if getattr(player, 'has_weapon_of_wind', False) else 1.0
             if getattr(player, 'has_weapons_of_the_wall', False): ww_mod *= 1.20
 
-            zenith_final = zenith_burst * (1.0 + player.versatility) * hc_mod * ww_mod * (1.0 + player.mastery)
+            zenith_final = zenith_burst * (1.0 + player.versatility) * hc_mod * ww_mod
             zenith_final = self._apply_aoe_scaling(zenith_final, player, 'soft_cap')
 
             extra_damage += zenith_final
