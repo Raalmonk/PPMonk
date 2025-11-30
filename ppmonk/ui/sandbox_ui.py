@@ -311,6 +311,10 @@ class SandboxWindow(ctk.CTkToplevel):
              self.ref_player.haste = self.sim_player.haste
         else:
              self.ref_player.haste = 1.0 + (haste / 17000.0)
+        # Basic haste calc (approximation)
+        haste_pct = haste / 17000.0 # Rough conversion if not using full sim logic in UI
+        # Better: use ref_player
+        self.ref_player.haste = 1.0 + (haste / 17000.0) # Very rough approximation for display
 
         for group_name, spell_keys in SPELL_GROUPS:
             # Header
@@ -741,6 +745,18 @@ class SandboxWindow(ctk.CTkToplevel):
         self.canvas.delete("all")
         self.block_map = {} # item_id (tag) -> data
         self.cursor_id = None # Reset cursor handle
+
+        # 1. Draw Group Headers/Backgrounds
+        for idx, (group_name, _) in enumerate(SPELL_GROUPS):
+            y_start = idx * ROW_HEIGHT
+            # Header Box
+            self.canvas.create_rectangle(0, y_start, HEADER_WIDTH, y_start + ROW_HEIGHT, fill="#2c3e50", outline="#34495e")
+            self.canvas.create_text(10, y_start + ROW_HEIGHT/2, text=group_name, fill="#ecf0f1", anchor="w", width=HEADER_WIDTH-20, font=("Arial", 10, "bold"))
+
+            # Lane Background
+            self.canvas.create_rectangle(HEADER_WIDTH, y_start, 5000, y_start + ROW_HEIGHT, fill="#1a1a1a", outline="#333333")
+
+        # 2. Draw Main Sequence Blocks (Time Scale)
 
         # 1. Draw Group Headers/Backgrounds
         for idx, (group_name, _) in enumerate(SPELL_GROUPS):
